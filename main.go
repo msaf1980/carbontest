@@ -6,13 +6,14 @@ import (
 	"fmt"
 	"log"
 	"os"
-	"strconv"
-	"strings"
+	//"strconv"
+	//"strings"
 	"time"
 
 	"runtime/pprof"
 
 	"github.com/msaf1980/cyclicbarrier"
+	//"github.com/msaf1980/ratelimit"
 )
 
 const (
@@ -20,6 +21,8 @@ const (
 )
 
 var cb *cyclicbarrier.CyclicBarrier
+
+var stat = map[Proto]map[NetOper]map[NetErr]int64{}
 
 var running = true
 
@@ -30,12 +33,12 @@ type config struct {
 	Duration     time.Duration
 	MetricPerCon int
 	BatchSend    int
-	RateLimit    []int32
-	SendDelay    time.Duration
-	ConTimeout   time.Duration
-	SendTimeout  time.Duration
-	UWorkers     int // UDP Workers
-	UBatchSend   int
+	//RateLimit    []int32
+	SendDelay   time.Duration
+	ConTimeout  time.Duration
+	SendTimeout time.Duration
+	UWorkers    int // UDP Workers
+	UBatchSend  int
 
 	MetricPrefix string // Prefix for generated metric name
 	Verbose      bool
@@ -46,7 +49,19 @@ type config struct {
 
 const header = "timestamp\tConId\tProto\tType\tStatus\tElapsed\tSize\n"
 
-func ParseArgs() (config, error) {
+func printStat(stat map[Proto]map[NetOper]map[NetErr]int64, duration time.Duration) {
+	// Print stat
+	for proto, opers := range stat {
+		for oper, errors := range opers {
+			for error, s := range errors {
+				fmt.Printf("%s.%s.%s %d (%d/s)\n", ProtoToString(proto), NetOperToString(oper), NetErrToString(error),
+					s, s/(duration.Nanoseconds()/1000000000))
+			}
+		}
+	}
+}
+
+func parseArgs() (config, error) {
 	var (
 		config      config
 		conTimeout  int
@@ -56,7 +71,7 @@ func ParseArgs() (config, error) {
 		port        int
 		duration    string
 		err         error
-		rateLimit   string
+		//rateLimit   string
 	)
 
 	flag.StringVar(&host, "host", "127.0.0.1", "hostname")
@@ -71,12 +86,12 @@ func ParseArgs() (config, error) {
 	//flag.IntVar(&config.UBatchSend, "ubatch", 1, "send metric count in one UDP send")
 	flag.StringVar(&config.MetricPrefix, "prefix", "test", "metric prefix")
 
-	flag.StringVar(&rateLimit, "rate", "", "rate limit, format: rate or minRate:maxRate:increment ")
+	//flag.StringVar(&rateLimit, "rate", "", "rate limit, format: rate or minRate:maxRate:increment ")
 	flag.IntVar(&sendDelay, "delay", 0, "send delay (ms)")
 
 	flag.BoolVar(&config.Verbose, "verbose", false, "verbose")
 
-	flag.StringVar(&config.StatFile, "stat", "grelaytest.csv", "stat file (appended)")
+	flag.StringVar(&config.StatFile, "stat", "test.csv", "stat file (appended)")
 
 	flag.StringVar(&config.CPUProf, "cpuprofile", "", "write cpu profile to file")
 
@@ -125,30 +140,54 @@ func ParseArgs() (config, error) {
 	config.ConTimeout = time.Duration(conTimeout) * time.Millisecond
 	config.SendDelay = time.Duration(sendDelay) * time.Millisecond
 
-	if rateLimit != "" {
-		rateS := strings.Split(rateLimit, ":")
-		if len(rateS) == 1 {
-			config.RateLimit = make([]int32, 1)
-			i, err := strconv.ParseInt(rateS[0], 10, 32)
-			if err != nil {
-				return config, fmt.Errorf("Invalid rate format: %s is not a number", rateS[0])
-			}
-			config.RateLimit[0] = int32(i)
-		} else if len(rateS) == 3 {
-			minRate, err := strconv.ParseInt(rateS[0], 10, 32)
-			maxRate, err := strconv.ParseInt(rateS[0], 10, 32)
-
-		} else {
-			return config, fmt.Errorf("Invalid rate format: %s", rateLimit)
-		}
-
-	}
+	//if rateLimit != "" {
+	//rateS := strings.Split(rateLimit, ":")
+	//if len(rateS) == 1 {
+	//config.RateLimit = make([]int32, 1)
+	//i, err := strconv.ParseInt(rateS[0], 10, 32)
+	//if err != nil {
+	//return config, fmt.Errorf("Invalid rate format: %s is not a number", rateS[0])
+	//}
+	//config.RateLimit[0] = int32(i)
+	//} else if len(rateS) == 3 {
+	//minRate, err := strconv.ParseInt(rateS[0], 10, 32)
+	//if err != nil || minRate < 1 {
+	//return config, fmt.Errorf("Invalid min rate format: %s", rateLimit)
+	//}
+	//maxRate, err := strconv.ParseInt(rateS[1], 10, 32)
+	//if err != nil || maxRate < 1 {
+	//return config, fmt.Errorf("Invalid max rate format: %s", rateLimit)
+	//}
+	//increment, err := strconv.ParseInt(rateS[2], 10, 32)
+	//if err != nil || increment < 1 {
+	//return config, fmt.Errorf("Invalid increment rate format: %s", rateLimit)
+	//}
+	//if minRate >= maxRate {
+	//return config, fmt.Errorf("Invalid min/max rate: %s", rateLimit)
+	//}
+	//count := (maxRate-minRate)/increment + (maxRate-minRate)%increment + 1
+	//config.RateLimit = make([]int32, count)
+	//start := int32(minRate)
+	//var i int32
+	//for {
+	//config.RateLimit[i] = start
+	//i++
+	//start += int32(increment)
+	//if start >= int32(maxRate) {
+	//config.RateLimit[i] = int32(maxRate)
+	//break
+	//}
+	//}
+	//} else {
+	//return config, fmt.Errorf("Invalid rate format: %s", rateLimit)
+	//}
+	//}
 
 	return config, nil
 }
 
 func main() {
-	config, err := ParseArgs()
+	config, err := parseArgs()
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "%s\n", err.Error())
 		os.Exit(1)
@@ -194,14 +233,16 @@ func main() {
 		go UDPWorker(i, config, result)
 	}
 
-	//start := time.Now()
 	go func() {
+		//rLimitCount := len(config.RateLimit)
+		//if rLimitCount == 0 {
 		time.Sleep(config.Duration)
+		//} else {
+
+		//}
 		log.Printf("Shutting down")
 		running = false
 	}()
-
-	var stat = map[Proto]map[NetOper]map[NetErr]int64{}
 
 	start := time.Now()
 
@@ -228,6 +269,7 @@ LOOP:
 					break LOOP
 				}
 			} else {
+				// write to stat file
 				fmt.Fprintf(w, "%d\t%d\t%s\t%s\t%s\t%d\t%d\n", r.TimeStamp/1000, r.Id,
 					ProtoToString(r.Proto), NetOperToString(r.Type),
 					NetErrToString(r.Error), r.Elapsed/1000, r.Size)
@@ -258,21 +300,5 @@ LOOP:
 	}
 	log.Printf("Shutdown, results writed to %s. Test duration %s", config.StatFile, duration)
 
-	// Print stat
-	for proto, opers := range stat {
-		for oper, errors := range opers {
-			for error, s := range errors {
-				fmt.Printf("%s.%s.%s %d (%d/s)\n", ProtoToString(proto), NetOperToString(oper), NetErrToString(error),
-					s, s/(duration.Nanoseconds()/1000000000))
-			}
-		}
-	}
-
-	//tcpStat(stat, con, duration, config)
-
-	//if duduration > 0 {
-	//log.Printf("UDP Workers: %d, total send: %d / %.2f sec = %d rps",
-	//config.UWorkers, ucon, float64(uduration)/float64(time.Second),
-	//time.Duration(ucon)*time.Second/uduration)
-	//}
+	printStat(stat, duration)
 }
