@@ -106,7 +106,7 @@ type ConStat struct {
 	TimeStamp int64
 	Elapsed   int64
 	Error     NetErr
-	Size      int
+	Size      int64
 }
 
 func ConStatNew(id int, proto Proto) *ConStat {
@@ -136,7 +136,7 @@ func (r *ConStat) ConStatZero() {
 //return d
 //}
 
-func metricBuffer(prefix string, id int, value int, timeStamp int64) []byte {
+func metricBuffer(prefix string, id int, value int, timeStamp int64) bytes.Buffer {
 	var buffer bytes.Buffer
 	buffer.WriteString(prefix)
 	buffer.WriteString(".")
@@ -147,7 +147,7 @@ func metricBuffer(prefix string, id int, value int, timeStamp int64) []byte {
 	buffer.WriteString(" ")
 	buffer.WriteString(strconv.FormatInt(timeStamp, 10))
 	buffer.WriteString("\n")
-	return buffer.Bytes()
+	return buffer
 }
 
 type Worker struct {
@@ -190,7 +190,7 @@ func TcpWorker(id int, config config, out chan ConStat) {
 				//metricString := fmt.Sprintf("%s.%d %d %d\n", metricPrefix, id, j, start.Unix())
 				metricBuf := metricBuffer(metricPrefix, id, j, start.Unix())
 				con.SetDeadline(start.Add(config.SendTimeout))
-				r.Size, err = rw.Write(metricBuf)
+				r.Size, err = metricBuf.WriteTo(rw)
 				//r.Size, err = rw.WriteString(metricString)
 				//r.Size, err = con.Write(metricBuf)
 				if err == nil {
@@ -249,7 +249,7 @@ func UDPWorker(id int, config config, out chan<- ConStat) {
 				sended, err := fmt.Fprintf(con, metricString)
 				con.Close()
 				r.Error = NetError(err)
-				r.Size = sended
+				r.Size = int64(sended)
 				if err == nil {
 					count++
 				}
