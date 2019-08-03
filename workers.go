@@ -2,10 +2,12 @@ package main
 
 import (
 	"bufio"
+	"bytes"
 	"fmt"
 	"io"
 	"log"
 	"net"
+	"strconv"
 	"strings"
 	"time"
 )
@@ -134,6 +136,20 @@ func (r *ConStat) ConStatZero() {
 //return d
 //}
 
+func metricBuffer(prefix string, id int, value int, timeStamp int64) []byte {
+	var buffer bytes.Buffer
+	buffer.WriteString(prefix)
+	buffer.WriteString(".")
+
+	buffer.WriteString(strconv.Itoa(id))
+	buffer.WriteString(" ")
+	buffer.WriteString(strconv.Itoa(value))
+	buffer.WriteString(" ")
+	buffer.WriteString(strconv.FormatInt(timeStamp, 10))
+	buffer.WriteString("\n")
+	return buffer.Bytes()
+}
+
 type Worker struct {
 	out chan string // A channel to communicate to the routine
 	//Interval time.Duration // The interval with which to run the Action
@@ -171,9 +187,12 @@ func TcpWorker(id int, config config, out chan ConStat) {
 		LOOP_INT:
 			for j := 0; running && j < config.MetricPerCon; j++ {
 				start := time.Now()
-				metricString := fmt.Sprintf("%s.%d %d %d\n", metricPrefix, id, j, start.Unix())
+				//metricString := fmt.Sprintf("%s.%d %d %d\n", metricPrefix, id, j, start.Unix())
+				metricBuf := metricBuffer(metricPrefix, id, j, start.Unix())
 				con.SetDeadline(start.Add(config.SendTimeout))
-				r.Size, err = rw.WriteString(metricString)
+				r.Size, err = rw.Write(metricBuf)
+				//r.Size, err = rw.WriteString(metricString)
+				//r.Size, err = con.Write(metricBuf)
 				if err == nil {
 					err = rw.Flush()
 				}
@@ -222,10 +241,9 @@ func UDPWorker(id int, config config, out chan<- ConStat) {
 	var count int64
 	for running {
 		for i := 0; running && i < 1000; i++ {
-			timeStamp := time.Now().Unix()
-			metricString := fmt.Sprintf("%s.%d %d %d\n", metricPrefix, i, i, timeStamp)
-
 			start := time.Now()
+			metricString := fmt.Sprintf("%s.%d %d %d\n", metricPrefix, i, i, start.Unix())
+
 			con, conError := net.Dial("udp", config.Addr)
 			if conError == nil {
 				sended, err := fmt.Fprintf(con, metricString)
