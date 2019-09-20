@@ -140,7 +140,7 @@ type Worker struct {
 	//period   time.Duration // The actual period of the wait
 }
 
-func TcpWorker(id int, config config, out chan ConStat) {
+func TcpWorker(id int, config config, out chan<- ConStat, mdetail chan<- string) {
 	var err error
 	r := ConStatNew(id, TCP)
 
@@ -171,7 +171,7 @@ func TcpWorker(id int, config config, out chan ConStat) {
 		LOOP_INT:
 			for j := 0; running && j < config.MetricPerCon; j++ {
 				start := time.Now()
-				metricString := fmt.Sprintf("%s.%d %d %d\n", metricPrefix, id, j, start.Unix())
+				metricString := fmt.Sprintf("%s.test%d %d %d\n", metricPrefix, id, j, start.Unix())
 				con.SetDeadline(start.Add(config.SendTimeout))
 				r.Size, err = rw.WriteString(metricString)
 				if err == nil {
@@ -183,6 +183,9 @@ func TcpWorker(id int, config config, out chan ConStat) {
 				r.TimeStamp = start.UnixNano()
 				out <- *r
 				if err == nil {
+					if config.DetailFile != "" {
+						mdetail <- metricString
+					}
 					count++
 				} else {
 					con.Close()
@@ -204,7 +207,7 @@ func TcpWorker(id int, config config, out chan ConStat) {
 	}
 }
 
-func UDPWorker(id int, config config, out chan<- ConStat) {
+func UDPWorker(id int, config config, out chan<- ConStat, mdetail chan<- string) {
 	r := ConStatNew(id, UDP)
 	r.Type = SEND
 
@@ -233,6 +236,9 @@ func UDPWorker(id int, config config, out chan<- ConStat) {
 				r.Error = NetError(err)
 				r.Size = sended
 				if err == nil {
+					if config.DetailFile != "" {
+						mdetail <- metricString
+					}
 					count++
 				}
 			} else {

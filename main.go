@@ -43,8 +43,9 @@ type config struct {
 	MetricPrefix string // Prefix for generated metric name
 	Verbose      bool
 
-	StatFile string // write connections stat to file
-	CPUProf  string // write cpu profile info to file
+	StatFile   string // write connections stat to file
+	DetailFile string // write sended metrics to file
+	CPUProf    string // write cpu profile info to file
 }
 
 const header = "timestamp\tConId\tProto\tType\tStatus\tElapsed\tSize\n"
@@ -92,6 +93,7 @@ func parseArgs() (config, error) {
 	flag.BoolVar(&config.Verbose, "verbose", false, "verbose")
 
 	flag.StringVar(&config.StatFile, "stat", "test.csv", "stat file (appended)")
+	flag.StringVar(&config.DetailFile, "detail", "", "detail file (appended)")
 
 	flag.StringVar(&config.CPUProf, "cpuprofile", "", "write cpu profile to file")
 
@@ -211,6 +213,24 @@ func main() {
 		os.Exit(2)
 	}
 
+	var dFile *os.File
+	var dw *bufio.Writer
+
+	if config.DetailFile != "" {
+		dFile, err = os.OpenFile(config.DetailFile, os.O_CREATE|os.O_RDWR, 0777)
+		if err != nil {
+			fmt.Fprintf(os.Stderr, "%s\n", err.Error())
+			os.Exit(2)
+		}
+		defer dFile.Close()
+		dw = bufio.NewWriter(dFile)
+		_, err = w.WriteString(header)
+		if err != nil {
+			fmt.Fprintf(os.Stderr, "%s\n", err.Error())
+			os.Exit(2)
+		}
+	}
+
 	if config.CPUProf != "" {
 		f, err := os.Create(config.CPUProf)
 		if err != nil {
@@ -221,16 +241,17 @@ func main() {
 	}
 
 	result := make(chan ConStat, (config.Workers+config.UWorkers)*1000)
+	mdetail := make(chan string, (config.Workers+config.UWorkers)*10000)
 	workers := config.Workers
 	uworkers := config.UWorkers
 
 	cb = cyclicbarrier.New(config.Workers + config.UWorkers + 1)
 
 	for i := 0; i < config.Workers; i++ {
-		go TcpWorker(i, config, result)
+		go TcpWorker(i, config, result, mdetail)
 	}
 	for i := 0; i < config.UWorkers; i++ {
-		go UDPWorker(i, config, result)
+		go UDPWorker(i, config, result, mdetail)
 	}
 
 	go func() {
@@ -252,6 +273,8 @@ func main() {
 LOOP:
 	for {
 		select {
+		case r := <-mdetail:
+			dw.WriteString(r)
 		case r := <-result:
 			if r.TimeStamp == 0 {
 				if r.Proto == TCP {
@@ -297,6 +320,12 @@ LOOP:
 	err = w.Flush()
 	if err != nil {
 		panic(err)
+	}
+	if config.DetailFile != "" {
+		err = dw.Flush()
+		if err != nil {
+			panic(err)
+		}
 	}
 	log.Printf("Shutdown, results writed to %s. Test duration %s", config.StatFile, duration)
 
