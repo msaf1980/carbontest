@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"log"
 	"os"
+
 	//"strconv"
 	//"strings"
 	"time"
@@ -274,7 +275,10 @@ LOOP:
 	for {
 		select {
 		case r := <-mdetail:
-			dw.WriteString(r)
+			_, err = dw.WriteString(r)
+			if err != nil {
+				panic(err)
+			}
 		case r := <-result:
 			if r.TimeStamp == 0 {
 				if r.Proto == TCP {
@@ -322,6 +326,13 @@ LOOP:
 		panic(err)
 	}
 	if config.DetailFile != "" {
+		for len(mdetail) > 0 {
+			r := <-mdetail
+			_, err = dw.WriteString(r)
+			if err != nil {
+				panic(err)
+			}
+		}
 		err = dw.Flush()
 		if err != nil {
 			panic(err)
