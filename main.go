@@ -8,7 +8,7 @@ import (
 	"os"
 
 	//"strconv"
-	//"strings"
+	"strings"
 	"time"
 
 	"runtime/pprof"
@@ -84,16 +84,16 @@ func parseArgs() (config, error) {
 	flag.IntVar(&port, "port", 2003, "port")
 	flag.IntVar(&config.Workers, "workers", 10, "TCP workers")
 	flag.StringVar(&duration, "duration", "60s", "total test duration")
-	flag.StringVar(&config.MetricPerCon, "metric", 1, "send metric count in one TCP connection")
+	flag.IntVar(&config.MetricPerCon, "metric", 1, "send metric count in one TCP connection")
 	//flag.IntVar(&config.BatchSend, "batch", 1, "send metric count in one TCP send")
-	flag.StringVar(&conTimeout, "t", 100, "TCP connect timeout (ms)")
-	flag.StringVar(&sendTimeout, "s", 500, "TCP send timeout (ms)")
 	flag.IntVar(&config.UWorkers, "uworkers", 0, "UDP workers (default 0)")
 	//flag.IntVar(&config.UBatchSend, "ubatch", 1, "send metric count in one UDP send")
 	flag.StringVar(&config.MetricPrefix, "prefix", "test", "metric prefix")
 
 	//flag.StringVar(&rateLimit, "rate", "", "rate limit, format: rate or minRate:maxRate:increment ")
-	flag.StringVar(&sendDelay, "delay", "0", "send delay random range (min[:max])")
+	flag.StringVar(&conTimeout, "c", "100ms", "TCP connect timeout (ms)")
+	flag.StringVar(&sendTimeout, "s", "500ms", "TCP send timeout (ms)")
+	flag.StringVar(&sendDelay, "delay", "0s", "send delay random range (min[:max])")
 
 	flag.BoolVar(&config.Verbose, "verbose", false, "verbose")
 
@@ -120,26 +120,44 @@ func parseArgs() (config, error) {
 			return config, errors.New(fmt.Sprintf("Invalid TCP metric batchsend value: %d\n", config.BatchSend))
 		}
 	*/
-	if sendTimeout < 1 {
-		return config, fmt.Errorf("Invalid TCP send timeout value: %d", sendTimeout)
-	}
-	if conTimeout < 1 {
-		return config, fmt.Errorf("Invalid TCP connection timeout value: %d", conTimeout)
-	}
 	if config.UWorkers < 0 {
 		return config, fmt.Errorf("Invalid UDP workers value: %d", config.Workers)
 	}
+
+	splitSendDelay := strings.Split(sendDelay, ":")
+	if len(splitSendDelay) >= 1 {
+		config.SendDelayMin, err = time.ParseDuration(splitSendDelay[0])
+		if err != nil || config.SendDelayMin < 0 {
+			return config, fmt.Errorf("Invalid min delay value: %s", splitSendDelay[0])
+		}
+	}
+	if len(splitSendDelay) == 1 {
+		config.SendDelayMax = config.SendDelayMin
+	} else if len(splitSendDelay) == 2 {
+		config.SendDelayMax, err = time.ParseDuration(splitSendDelay[1])
+		if err != nil || config.SendDelayMax < 0 {
+			return config, fmt.Errorf("Invalid max delay value: %s", splitSendDelay[1])
+		} else if config.SendDelayMin > config.SendDelayMax {
+			return config, fmt.Errorf("Invalid max delay value less than minimal: %s", sendDelay)
+		}
+	} else {
+		return config, fmt.Errorf("Invalid delay value: %s", sendDelay)
+	}
+
+	config.SendTimeout, err = time.ParseDuration(sendTimeout)
+	if err != nil || config.SendTimeout < 0 {
+		if config.SendTimeout < 1 {
+			return config, fmt.Errorf("Invalid TCP send timeout value: %s", sendTimeout)
+		}
+	}
+	config.ConTimeout, err = time.ParseDuration(conTimeout)
+	if err != nil || config.ConTimeout < 1*time.Microsecond {
+		return config, fmt.Errorf("Invalid TCP connection timeout value: %s", conTimeout)
+	}
 	config.Duration, err = time.ParseDuration(duration)
-	if err != nil || config.Duration < 1000000000 {
+	if err != nil || config.Duration < time.Second {
 		return config, fmt.Errorf("Invalid test duration: %s", duration)
 	}
-	if sendDelay < 0 {
-		return config, fmt.Errorf("Invalid delay value: %d", sendDelay)
-	}
-	config.SendDelay = time.ParseDuration(sendDelay)
-
-	config.SendTimeout = time.parseDuration(sendTimeout)
-	config.ConTimeout = time.parseDuration(conTimeout)
 
 	config.Addr = fmt.Sprintf("%s:%d", host, port)
 

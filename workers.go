@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"io"
 	"log"
+	"math/rand"
 	"net"
 	"strings"
 	"time"
@@ -140,6 +141,14 @@ type Worker struct {
 	//period   time.Duration // The actual period of the wait
 }
 
+func RandomDuration(min time.Duration, max time.Duration) time.Duration {
+	if max > min {
+		return time.Duration(rand.Int63n(max.Nanoseconds()-min.Nanoseconds())+min.Nanoseconds()) * time.Nanosecond
+	} else {
+		return min
+	}
+}
+
 func TcpWorker(id int, config config, out chan<- ConStat, mdetail chan<- string) {
 	var err error
 	r := ConStatNew(id, TCP)
@@ -171,7 +180,7 @@ func TcpWorker(id int, config config, out chan<- ConStat, mdetail chan<- string)
 		LOOP_INT:
 			for j := 0; running && j < config.MetricPerCon; j++ {
 				start := time.Now()
-				metricString := fmt.Sprintf("%s.test%d %d %d\n", metricPrefix, id, j, start.Unix())
+				metricString := fmt.Sprintf("%s.%dtest%d %d %d\n", metricPrefix, j, id, j, start.Unix())
 				con.SetDeadline(start.Add(config.SendTimeout))
 				r.Size, err = rw.WriteString(metricString)
 				if err == nil {
@@ -188,17 +197,23 @@ func TcpWorker(id int, config config, out chan<- ConStat, mdetail chan<- string)
 					}
 					count++
 				} else {
+					if config.Verbose && r.Error == ERROR {
+						log.Print(conError)
+					}
 					con.Close()
 					break LOOP_INT
 				}
-				if config.SendDelay > 0 {
-					time.Sleep(config.SendDelay)
+				if config.SendDelayMax > 0 {
+					time.Sleep(RandomDuration(config.SendDelayMin, config.SendDelayMax))
 				}
 			}
 			con.Close()
 		} else {
-			if config.SendDelay > 0 {
-				time.Sleep(config.SendDelay)
+			if config.Verbose && r.Error == ERROR {
+				log.Print(conError)
+			}
+			if config.SendDelayMax > 0 {
+				time.Sleep(RandomDuration(config.SendDelayMin, config.SendDelayMax))
 			}
 		}
 	}
@@ -248,8 +263,8 @@ func UDPWorker(id int, config config, out chan<- ConStat, mdetail chan<- string)
 			r.Elapsed = time.Since(start).Nanoseconds()
 			r.TimeStamp = start.UnixNano()
 			out <- *r
-			if config.SendDelay > 0 {
-				time.Sleep(config.SendDelay)
+			if config.SendDelayMax > 0 {
+				time.Sleep(RandomDuration(config.SendDelayMin, config.SendDelayMax))
 			}
 
 			out <- *r
