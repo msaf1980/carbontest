@@ -35,11 +35,15 @@ type config struct {
 	MetricPerCon int
 	BatchSend    int
 	//RateLimit    []int32
-	SendDelay   time.Duration
+
+	SendDelayMin time.Duration
+	SendDelayMax time.Duration
+
 	ConTimeout  time.Duration
 	SendTimeout time.Duration
-	UWorkers    int // UDP Workers
-	UBatchSend  int
+
+	UWorkers   int // UDP Workers
+	UBatchSend int
 
 	MetricPrefix string // Prefix for generated metric name
 	Verbose      bool
@@ -66,9 +70,9 @@ func printStat(stat map[Proto]map[NetOper]map[NetErr]int64, duration time.Durati
 func parseArgs() (config, error) {
 	var (
 		config      config
-		conTimeout  int
-		sendTimeout int
-		sendDelay   int
+		conTimeout  string
+		sendTimeout string
+		sendDelay   string
 		host        string
 		port        int
 		duration    string
@@ -80,16 +84,16 @@ func parseArgs() (config, error) {
 	flag.IntVar(&port, "port", 2003, "port")
 	flag.IntVar(&config.Workers, "workers", 10, "TCP workers")
 	flag.StringVar(&duration, "duration", "60s", "total test duration")
-	flag.IntVar(&config.MetricPerCon, "metric", 1, "send metric count in one TCP connection")
+	flag.StringVar(&config.MetricPerCon, "metric", 1, "send metric count in one TCP connection")
 	//flag.IntVar(&config.BatchSend, "batch", 1, "send metric count in one TCP send")
-	flag.IntVar(&conTimeout, "t", 100, "TCP connect timeout (ms)")
-	flag.IntVar(&sendTimeout, "s", 500, "TCP send timeout (ms)")
+	flag.StringVar(&conTimeout, "t", 100, "TCP connect timeout (ms)")
+	flag.StringVar(&sendTimeout, "s", 500, "TCP send timeout (ms)")
 	flag.IntVar(&config.UWorkers, "uworkers", 0, "UDP workers (default 0)")
 	//flag.IntVar(&config.UBatchSend, "ubatch", 1, "send metric count in one UDP send")
 	flag.StringVar(&config.MetricPrefix, "prefix", "test", "metric prefix")
 
 	//flag.StringVar(&rateLimit, "rate", "", "rate limit, format: rate or minRate:maxRate:increment ")
-	flag.IntVar(&sendDelay, "delay", 0, "send delay (ms)")
+	flag.StringVar(&sendDelay, "delay", "0", "send delay random range (min[:max])")
 
 	flag.BoolVar(&config.Verbose, "verbose", false, "verbose")
 
@@ -132,16 +136,12 @@ func parseArgs() (config, error) {
 	if sendDelay < 0 {
 		return config, fmt.Errorf("Invalid delay value: %d", sendDelay)
 	}
+	config.SendDelay = time.ParseDuration(sendDelay)
 
-	/*
-		if config.UBatchSend < 1 {
-			return config, errors.New(fmt.Sprintf("Invalid UDP metric batchsend value: %d\n", config.UBatchSend))
-		}
-	*/
+	config.SendTimeout = time.parseDuration(sendTimeout)
+	config.ConTimeout = time.parseDuration(conTimeout)
+
 	config.Addr = fmt.Sprintf("%s:%d", host, port)
-	config.SendTimeout = time.Duration(sendTimeout) * time.Millisecond
-	config.ConTimeout = time.Duration(conTimeout) * time.Millisecond
-	config.SendDelay = time.Duration(sendDelay) * time.Millisecond
 
 	//if rateLimit != "" {
 	//rateS := strings.Split(rateLimit, ":")
