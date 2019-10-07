@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"log"
 	"os"
+	"sort"
 
 	//"strconv"
 	"strings"
@@ -57,13 +58,21 @@ const header = "timestamp\tConId\tProto\tType\tStatus\tElapsed\tSize\n"
 
 func printStat(stat map[Proto]map[NetOper]map[NetErr]int64, duration time.Duration) {
 	// Print stat
+	var statVal []string
+
 	for proto, opers := range stat {
 		for oper, errors := range opers {
 			for error, s := range errors {
-				fmt.Printf("%s.%s.%s %d (%d/s)\n", ProtoToString(proto), NetOperToString(oper), NetErrToString(error),
+				v := fmt.Sprintf("%s.%s.%s %d (%d/s)\n", ProtoToString(proto), NetOperToString(oper), NetErrToString(error),
 					s, s/(duration.Nanoseconds()/1000000000))
+				statVal = append(statVal, v)
 			}
 		}
+	}
+
+	sort.Strings(statVal)
+	for _, s := range statVal {
+		fmt.Print(s)
 	}
 }
 
