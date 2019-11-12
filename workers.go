@@ -2,6 +2,7 @@ package main
 
 import (
 	"bufio"
+	"compress/gzip"
 	"fmt"
 	"io"
 	"log"
@@ -9,6 +10,14 @@ import (
 	"net"
 	"strings"
 	"time"
+)
+
+type CompressType int
+
+const (
+	NONE CompressType = iota
+	GZIP
+	LZ4
 )
 
 type NetOper int
@@ -165,6 +174,7 @@ func TcpWorker(id int, config config, out chan<- ConStat, mdetail chan<- string)
 	}
 
 	var count int64
+	var w io.Writer
 	for running {
 		//r.ResultZero()
 		start := time.Now()
@@ -176,15 +186,23 @@ func TcpWorker(id int, config config, out chan<- ConStat, mdetail chan<- string)
 		r.Size = 0
 		out <- *r
 		if conError == nil {
-			rw := bufio.NewReadWriter(bufio.NewReader(con), bufio.NewWriter(con))
+			if config.Compress == GZIP {
+				w, _ = gzip.NewWriterLevel(con, gzip.DefaultCompression)
+			} else {
+				w = bufio.NewWriter(con)
+			}
 		LOOP_INT:
 			for j := 0; running && j < config.MetricPerCon; j++ {
 				start := time.Now()
 				metricString := fmt.Sprintf("%s.%dtest%d %d %d\n", metricPrefix, j, id, j, start.Unix())
 				con.SetDeadline(start.Add(config.SendTimeout))
-				r.Size, err = rw.WriteString(metricString)
+				r.Size, err = w.Write([]byte(metricString))
 				if err == nil {
-					err = rw.Flush()
+					if config.Compress == GZIP {
+						err = w.(*gzip.Writer).Flush()
+					} else {
+						err = w.(*bufio.Writer).Flush()
+					}
 				}
 				r.Elapsed = time.Since(start).Nanoseconds()
 				r.Type = SEND
