@@ -1,8 +1,6 @@
 package main
 
 import (
-	"bufio"
-	"fmt"
 	"io"
 	"log"
 	"math/rand"
@@ -85,12 +83,10 @@ type Proto int
 
 const (
 	TCP Proto = iota
-	UDP
 )
 
 var ProtoStrings = [...]string{
 	"TCP",
-	"UDP",
 }
 
 func ProtoToString(proto Proto) string {
@@ -149,7 +145,7 @@ func RandomDuration(min time.Duration, max time.Duration) time.Duration {
 	}
 }
 
-func TcpWorker(id int, config config, out chan<- ConStat, mdetail chan<- string) {
+func TcpWorker(id int, config config, in []byte, out chan<- ConStat) {
 	var err error
 	r := ConStatNew(id, TCP)
 
@@ -158,7 +154,6 @@ func TcpWorker(id int, config config, out chan<- ConStat, mdetail chan<- string)
 		ch <- *r
 	}(out)
 
-	metricPrefix := fmt.Sprintf("%s.worker%d", config.MetricPrefix, id)
 	cb.Await()
 	if config.Verbose {
 		log.Printf("Started TCP worker %d\n", id)
@@ -176,25 +171,17 @@ func TcpWorker(id int, config config, out chan<- ConStat, mdetail chan<- string)
 		r.Size = 0
 		out <- *r
 		if conError == nil {
-			rw := bufio.NewReadWriter(bufio.NewReader(con), bufio.NewWriter(con))
 		LOOP_INT:
 			for j := 0; running && j < config.MetricPerCon; j++ {
 				start := time.Now()
-				metricString := fmt.Sprintf("%s.%dtest%d %d %d\n", metricPrefix, j, id, j, start.Unix())
 				con.SetDeadline(start.Add(config.SendTimeout))
-				r.Size, err = rw.WriteString(metricString)
-				if err == nil {
-					err = rw.Flush()
-				}
+				r.Size, err = con.Write(in)
 				r.Elapsed = time.Since(start).Nanoseconds()
 				r.Type = SEND
 				r.Error = NetError(err)
 				r.TimeStamp = start.UnixNano()
 				out <- *r
 				if err == nil {
-					if config.DetailFile != "" {
-						mdetail <- metricString
-					}
 					count++
 				} else {
 					if config.Verbose && r.Error == ERROR {
@@ -219,58 +206,5 @@ func TcpWorker(id int, config config, out chan<- ConStat, mdetail chan<- string)
 	}
 	if config.Verbose {
 		log.Printf("Ended TCP worker %d, %d metrics\n", id, count)
-	}
-}
-
-func UDPWorker(id int, config config, out chan<- ConStat, mdetail chan<- string) {
-	r := ConStatNew(id, UDP)
-	r.Type = SEND
-
-	defer func(ch chan<- ConStat) {
-		r.ConStatZero()
-		ch <- *r
-	}(out)
-
-	metricPrefix := fmt.Sprintf("%s.udpworker%d", config.MetricPrefix, id)
-	cb.Await()
-	if config.Verbose {
-		log.Printf("Started UDP worker %d\n", id)
-	}
-
-	var count int64
-	for running {
-		for i := 0; running && i < 1000; i++ {
-			timeStamp := time.Now().Unix()
-			metricString := fmt.Sprintf("%s.%d %d %d\n", metricPrefix, i, i, timeStamp)
-
-			start := time.Now()
-			con, conError := net.Dial("udp", config.Addr)
-			if conError == nil {
-				sended, err := fmt.Fprintf(con, metricString)
-				con.Close()
-				r.Error = NetError(err)
-				r.Size = sended
-				if err == nil {
-					if config.DetailFile != "" {
-						mdetail <- metricString
-					}
-					count++
-				}
-			} else {
-				r.Error = NetError(conError)
-				r.Size = 0
-			}
-			r.Elapsed = time.Since(start).Nanoseconds()
-			r.TimeStamp = start.UnixNano()
-			out <- *r
-			if config.SendDelayMax > 0 {
-				time.Sleep(RandomDuration(config.SendDelayMin, config.SendDelayMax))
-			}
-
-			out <- *r
-		}
-	}
-	if config.Verbose {
-		log.Printf("Ended UDP worker %d, %d metrics\n", id, count)
 	}
 }

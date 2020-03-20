@@ -4,6 +4,7 @@ import (
 	"bufio"
 	"flag"
 	"fmt"
+	"io/ioutil"
 	"log"
 	"os"
 	"sort"
@@ -43,11 +44,10 @@ type config struct {
 	ConTimeout  time.Duration
 	SendTimeout time.Duration
 
-	UWorkers   int // UDP Workers
-	UBatchSend int
-
 	MetricPrefix string // Prefix for generated metric name
 	Verbose      bool
+
+	InFile string
 
 	StatFile   string // write connections stat to file
 	DetailFile string // write sended metrics to file
@@ -95,7 +95,6 @@ func parseArgs() (config, error) {
 	flag.StringVar(&duration, "duration", "60s", "total test duration")
 	flag.IntVar(&config.MetricPerCon, "metric", 1, "send metric count in one TCP connection")
 	//flag.IntVar(&config.BatchSend, "batch", 1, "send metric count in one TCP send")
-	flag.IntVar(&config.UWorkers, "uworkers", 0, "UDP workers (default 0)")
 	//flag.IntVar(&config.UBatchSend, "ubatch", 1, "send metric count in one UDP send")
 	flag.StringVar(&config.MetricPrefix, "prefix", "test", "metric prefix")
 
@@ -104,10 +103,11 @@ func parseArgs() (config, error) {
 	flag.StringVar(&sendTimeout, "s", "500ms", "TCP send timeout (ms)")
 	flag.StringVar(&sendDelay, "delay", "0s", "send delay random range (min[:max])")
 
+	flag.StringVar(&config.InFile, "file", "", "input file")
+
 	flag.BoolVar(&config.Verbose, "verbose", false, "verbose")
 
 	flag.StringVar(&config.StatFile, "stat", "test.csv", "stat file (appended)")
-	flag.StringVar(&config.DetailFile, "detail", "", "detail file (appended)")
 
 	flag.StringVar(&config.CPUProf, "cpuprofile", "", "write cpu profile to file")
 
@@ -129,9 +129,6 @@ func parseArgs() (config, error) {
 			return config, errors.New(fmt.Sprintf("Invalid TCP metric batchsend value: %d\n", config.BatchSend))
 		}
 	*/
-	if config.UWorkers < 0 {
-		return config, fmt.Errorf("Invalid UDP workers value: %d", config.Workers)
-	}
 
 	splitSendDelay := strings.Split(sendDelay, ":")
 	if len(splitSendDelay) >= 1 {
@@ -170,48 +167,9 @@ func parseArgs() (config, error) {
 
 	config.Addr = fmt.Sprintf("%s:%d", host, port)
 
-	//if rateLimit != "" {
-	//rateS := strings.Split(rateLimit, ":")
-	//if len(rateS) == 1 {
-	//config.RateLimit = make([]int32, 1)
-	//i, err := strconv.ParseInt(rateS[0], 10, 32)
-	//if err != nil {
-	//return config, fmt.Errorf("Invalid rate format: %s is not a number", rateS[0])
-	//}
-	//config.RateLimit[0] = int32(i)
-	//} else if len(rateS) == 3 {
-	//minRate, err := strconv.ParseInt(rateS[0], 10, 32)
-	//if err != nil || minRate < 1 {
-	//return config, fmt.Errorf("Invalid min rate format: %s", rateLimit)
-	//}
-	//maxRate, err := strconv.ParseInt(rateS[1], 10, 32)
-	//if err != nil || maxRate < 1 {
-	//return config, fmt.Errorf("Invalid max rate format: %s", rateLimit)
-	//}
-	//increment, err := strconv.ParseInt(rateS[2], 10, 32)
-	//if err != nil || increment < 1 {
-	//return config, fmt.Errorf("Invalid increment rate format: %s", rateLimit)
-	//}
-	//if minRate >= maxRate {
-	//return config, fmt.Errorf("Invalid min/max rate: %s", rateLimit)
-	//}
-	//count := (maxRate-minRate)/increment + (maxRate-minRate)%increment + 1
-	//config.RateLimit = make([]int32, count)
-	//start := int32(minRate)
-	//var i int32
-	//for {
-	//config.RateLimit[i] = start
-	//i++
-	//start += int32(increment)
-	//if start >= int32(maxRate) {
-	//config.RateLimit[i] = int32(maxRate)
-	//break
-	//}
-	//}
-	//} else {
-	//return config, fmt.Errorf("Invalid rate format: %s", rateLimit)
-	//}
-	//}
+	if config.InFile == "" {
+		return config, fmt.Errorf("Invalid input file")
+	}
 
 	return config, nil
 }
@@ -241,22 +199,11 @@ func main() {
 		os.Exit(2)
 	}
 
-	var dFile *os.File
-	var dw *bufio.Writer
-
-	if config.DetailFile != "" {
-		dFile, err = os.OpenFile(config.DetailFile, os.O_CREATE|os.O_RDWR, 0777)
-		if err != nil {
-			fmt.Fprintf(os.Stderr, "%s\n", err.Error())
-			os.Exit(2)
-		}
-		defer dFile.Close()
-		dw = bufio.NewWriter(dFile)
-		_, err = w.WriteString(header)
-		if err != nil {
-			fmt.Fprintf(os.Stderr, "%s\n", err.Error())
-			os.Exit(2)
-		}
+	b, err := ioutil.ReadFile(config.InFile)
+	// can file be opened?
+	if err != nil {
+		fmt.Print(err)
+		os.Exit(1)
 	}
 
 	if config.CPUProf != "" {
@@ -268,18 +215,13 @@ func main() {
 		defer pprof.StopCPUProfile()
 	}
 
-	result := make(chan ConStat, (config.Workers+config.UWorkers)*1000)
-	mdetail := make(chan string, (config.Workers+config.UWorkers)*10000)
+	result := make(chan ConStat, config.Workers*1000)
 	workers := config.Workers
-	uworkers := config.UWorkers
 
-	cb = cyclicbarrier.New(config.Workers + config.UWorkers + 1)
+	cb = cyclicbarrier.New(config.Workers + 1)
 
 	for i := 0; i < config.Workers; i++ {
-		go TcpWorker(i, config, result, mdetail)
-	}
-	for i := 0; i < config.UWorkers; i++ {
-		go UDPWorker(i, config, result, mdetail)
+		go TcpWorker(i, config, b, result)
 	}
 
 	go func() {
@@ -295,17 +237,12 @@ func main() {
 
 	start := time.Now()
 
-	log.Printf("Starting TCP workers: %d, UDP %d\n", config.Workers, config.UWorkers)
+	log.Printf("Starting TCP workers: %d\n", config.Workers)
 	cb.Await()
 
 LOOP:
 	for {
 		select {
-		case r := <-mdetail:
-			_, err = dw.WriteString(r)
-			if err != nil {
-				panic(err)
-			}
 		case r := <-result:
 			if r.TimeStamp == 0 {
 				if r.Proto == TCP {
@@ -313,13 +250,8 @@ LOOP:
 					//if workers == 0 {
 					//duration = time.Since(start)
 					//}
-				} else {
-					uworkers--
-					//if uworkers == 0 {
-					//uduration = time.Since(start)
-					//}
 				}
-				if workers <= 0 && uworkers <= 0 {
+				if workers <= 0 {
 					break LOOP
 				}
 			} else {
@@ -351,19 +283,6 @@ LOOP:
 	err = w.Flush()
 	if err != nil {
 		panic(err)
-	}
-	if config.DetailFile != "" {
-		for len(mdetail) > 0 {
-			r := <-mdetail
-			_, err = dw.WriteString(r)
-			if err != nil {
-				panic(err)
-			}
-		}
-		err = dw.Flush()
-		if err != nil {
-			panic(err)
-		}
 	}
 	log.Printf("Shutdown, results writed to %s. Test duration %s", config.StatFile, duration)
 
