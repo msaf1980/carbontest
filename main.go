@@ -37,6 +37,8 @@ type config struct {
 	BatchSend    int
 	//RateLimit    []int32
 
+	Compress CompressType
+
 	SendDelayMin time.Duration
 	SendDelayMax time.Duration
 
@@ -78,14 +80,15 @@ func printStat(stat map[Proto]map[NetOper]map[NetErr]int64, duration time.Durati
 
 func parseArgs() (config, error) {
 	var (
-		config      config
-		conTimeout  string
-		sendTimeout string
-		sendDelay   string
-		host        string
-		port        int
-		duration    string
-		err         error
+		config       config
+		conTimeout   string
+		sendTimeout  string
+		sendDelay    string
+		host         string
+		port         int
+		duration     string
+		err          error
+		compressType string
 		//rateLimit   string
 	)
 
@@ -110,6 +113,8 @@ func parseArgs() (config, error) {
 	flag.StringVar(&config.DetailFile, "detail", "", "detail file (appended)")
 
 	flag.StringVar(&config.CPUProf, "cpuprofile", "", "write cpu profile to file")
+
+	flag.StringVar(&compressType, "compress", "", "compress [ gzip | lz4 ]")
 
 	flag.Parse()
 	if host == "" {
@@ -166,6 +171,15 @@ func parseArgs() (config, error) {
 	config.Duration, err = time.ParseDuration(duration)
 	if err != nil || config.Duration < time.Second {
 		return config, fmt.Errorf("Invalid test duration: %s", duration)
+	}
+
+	compressType = strings.ToLower(compressType)
+	if compressType == "" {
+		config.Compress = NONE
+	} else if compressType == "gzip" {
+		config.Compress = GZIP
+	} else {
+		return config, fmt.Errorf("Invalid compress type: %s", compressType)
 	}
 
 	config.Addr = fmt.Sprintf("%s:%d", host, port)
