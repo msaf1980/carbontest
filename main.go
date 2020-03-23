@@ -15,7 +15,7 @@ import (
 	"runtime/pprof"
 
 	"github.com/msaf1980/cyclicbarrier"
-	//"github.com/msaf1980/ratelimit"
+	"go.uber.org/ratelimit"
 )
 
 const (
@@ -35,12 +35,12 @@ type config struct {
 	Duration     time.Duration
 	MetricPerCon int
 	BatchSend    int
-	//RateLimit    []int32
 
 	Compress CompressType
 
 	SendDelayMin time.Duration
 	SendDelayMax time.Duration
+	RateLimiter  ratelimit.Limiter
 
 	ConTimeout  time.Duration
 	SendTimeout time.Duration
@@ -89,7 +89,7 @@ func parseArgs() (config, error) {
 		duration     string
 		err          error
 		compressType string
-		//rateLimit   string
+		rateLimit    int
 	)
 
 	flag.StringVar(&host, "host", "127.0.0.1", "hostname")
@@ -102,10 +102,11 @@ func parseArgs() (config, error) {
 	//flag.IntVar(&config.UBatchSend, "ubatch", 1, "send metric count in one UDP send")
 	flag.StringVar(&config.MetricPrefix, "prefix", "test", "metric prefix")
 
-	//flag.StringVar(&rateLimit, "rate", "", "rate limit, format: rate or minRate:maxRate:increment ")
 	flag.StringVar(&conTimeout, "c", "100ms", "TCP connect timeout (ms)")
 	flag.StringVar(&sendTimeout, "s", "500ms", "TCP send timeout (ms)")
+
 	flag.StringVar(&sendDelay, "delay", "0s", "send delay random range (min[:max])")
+	flag.IntVar(&rateLimit, "rate", 0, "rate limit/s")
 
 	flag.BoolVar(&config.Verbose, "verbose", false, "verbose")
 
@@ -158,6 +159,17 @@ func parseArgs() (config, error) {
 		return config, fmt.Errorf("Invalid delay value: %s", sendDelay)
 	}
 
+	if rateLimit < 0 {
+		return config, fmt.Errorf("Invalid rate limit value: %d", rateLimit)
+	} else if rateLimit > 0 {
+		if config.SendDelayMax > 0 {
+			return config, fmt.Errorf("delay and rate limit can't be used together")
+		}
+		config.RateLimiter = ratelimit.New(rateLimit)
+	} else {
+		config.RateLimiter = ratelimit.NewUnlimited()
+	}
+
 	config.SendTimeout, err = time.ParseDuration(sendTimeout)
 	if err != nil || config.SendTimeout < 0 {
 		if config.SendTimeout < 1 {
@@ -183,49 +195,6 @@ func parseArgs() (config, error) {
 	}
 
 	config.Addr = fmt.Sprintf("%s:%d", host, port)
-
-	//if rateLimit != "" {
-	//rateS := strings.Split(rateLimit, ":")
-	//if len(rateS) == 1 {
-	//config.RateLimit = make([]int32, 1)
-	//i, err := strconv.ParseInt(rateS[0], 10, 32)
-	//if err != nil {
-	//return config, fmt.Errorf("Invalid rate format: %s is not a number", rateS[0])
-	//}
-	//config.RateLimit[0] = int32(i)
-	//} else if len(rateS) == 3 {
-	//minRate, err := strconv.ParseInt(rateS[0], 10, 32)
-	//if err != nil || minRate < 1 {
-	//return config, fmt.Errorf("Invalid min rate format: %s", rateLimit)
-	//}
-	//maxRate, err := strconv.ParseInt(rateS[1], 10, 32)
-	//if err != nil || maxRate < 1 {
-	//return config, fmt.Errorf("Invalid max rate format: %s", rateLimit)
-	//}
-	//increment, err := strconv.ParseInt(rateS[2], 10, 32)
-	//if err != nil || increment < 1 {
-	//return config, fmt.Errorf("Invalid increment rate format: %s", rateLimit)
-	//}
-	//if minRate >= maxRate {
-	//return config, fmt.Errorf("Invalid min/max rate: %s", rateLimit)
-	//}
-	//count := (maxRate-minRate)/increment + (maxRate-minRate)%increment + 1
-	//config.RateLimit = make([]int32, count)
-	//start := int32(minRate)
-	//var i int32
-	//for {
-	//config.RateLimit[i] = start
-	//i++
-	//start += int32(increment)
-	//if start >= int32(maxRate) {
-	//config.RateLimit[i] = int32(maxRate)
-	//break
-	//}
-	//}
-	//} else {
-	//return config, fmt.Errorf("Invalid rate format: %s", rateLimit)
-	//}
-	//}
 
 	return config, nil
 }

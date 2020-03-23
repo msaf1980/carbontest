@@ -48,6 +48,7 @@ const (
 	LOOKUP
 	REFUSED
 	RESET
+	FILELIMIT
 )
 
 var NetErrStrings = [...]string{
@@ -58,6 +59,7 @@ var NetErrStrings = [...]string{
 	"LOOKUP",
 	"REFUSED",
 	"RESET",
+	"FILELIMIT",
 }
 
 func NetErrToString(err NetErr) string {
@@ -85,6 +87,8 @@ func NetError(err error) NetErr {
 		} else if strings.HasSuffix(err.Error(), ": broken pipe") ||
 			strings.HasSuffix(err.Error(), "EOF") {
 			return EOF
+		} else if strings.HasSuffix(err.Error(), ": socket: too many open files") {
+			return REFUSED
 		}
 	}
 	return ERROR
@@ -177,7 +181,9 @@ func TcpWorker(id int, config config, out chan<- ConStat, mdetail chan<- string)
 	var w io.Writer
 	for running {
 		//r.ResultZero()
-		start := time.Now()
+		var start time.Time
+		var end time.Time
+		start = time.Now()
 		con, conError := net.DialTimeout("tcp", config.Addr, config.ConTimeout)
 		r.Elapsed = time.Since(start).Nanoseconds()
 		r.Type = CONNECT
@@ -193,8 +199,8 @@ func TcpWorker(id int, config config, out chan<- ConStat, mdetail chan<- string)
 			}
 		LOOP_INT:
 			for j := 0; running && j < config.MetricPerCon; j++ {
-				start := time.Now()
 				metricString := fmt.Sprintf("%s.%dtest%d %d %d\n", metricPrefix, j, id, j, start.Unix())
+				start = time.Now()
 				con.SetDeadline(start.Add(config.SendTimeout))
 				r.Size, err = w.Write([]byte(metricString))
 				if err == nil {
@@ -204,7 +210,15 @@ func TcpWorker(id int, config config, out chan<- ConStat, mdetail chan<- string)
 						err = w.(*bufio.Writer).Flush()
 					}
 				}
-				r.Elapsed = time.Since(start).Nanoseconds()
+
+				if config.SendDelayMax > 0 {
+					end = time.Now()
+					time.Sleep(RandomDuration(config.SendDelayMin, config.SendDelayMax))
+				} else {
+					end = config.RateLimiter.Take()
+				}
+
+				r.Elapsed = end.Sub(start).Nanoseconds()
 				r.Type = SEND
 				r.Error = NetError(err)
 				r.TimeStamp = start.UnixNano()
@@ -221,9 +235,6 @@ func TcpWorker(id int, config config, out chan<- ConStat, mdetail chan<- string)
 					con.Close()
 					break LOOP_INT
 				}
-				if config.SendDelayMax > 0 {
-					time.Sleep(RandomDuration(config.SendDelayMin, config.SendDelayMax))
-				}
 			}
 			con.Close()
 		} else {
@@ -232,6 +243,8 @@ func TcpWorker(id int, config config, out chan<- ConStat, mdetail chan<- string)
 			}
 			if config.SendDelayMax > 0 {
 				time.Sleep(RandomDuration(config.SendDelayMin, config.SendDelayMax))
+			} else {
+				config.RateLimiter.Take()
 			}
 		}
 	}
@@ -256,6 +269,7 @@ func UDPWorker(id int, config config, out chan<- ConStat, mdetail chan<- string)
 	}
 
 	var count int64
+	var end time.Time
 	for running {
 		for i := 0; running && i < 1000; i++ {
 			timeStamp := time.Now().Unix()
@@ -278,13 +292,16 @@ func UDPWorker(id int, config config, out chan<- ConStat, mdetail chan<- string)
 				r.Error = NetError(conError)
 				r.Size = 0
 			}
-			r.Elapsed = time.Since(start).Nanoseconds()
-			r.TimeStamp = start.UnixNano()
-			out <- *r
+
 			if config.SendDelayMax > 0 {
+				end = time.Now()
 				time.Sleep(RandomDuration(config.SendDelayMin, config.SendDelayMax))
+			} else {
+				end = config.RateLimiter.Take()
 			}
 
+			r.Elapsed = end.Sub(start).Nanoseconds()
+			r.TimeStamp = start.UnixNano()
 			out <- *r
 		}
 	}
