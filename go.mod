@@ -1,0 +1,8 @@
+module carbontest
+
+require (
+	github.com/msaf1980/cyclicbarrier v1.0.0
+	github.com/stretchr/testify v1.5.1 // indirect
+	go.uber.org/atomic v1.6.0 // indirect
+	go.uber.org/ratelimit v0.1.0
+)
