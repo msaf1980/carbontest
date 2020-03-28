@@ -88,7 +88,7 @@ func NetError(err error) NetErr {
 			strings.HasSuffix(err.Error(), "EOF") {
 			return EOF
 		} else if strings.HasSuffix(err.Error(), ": socket: too many open files") {
-			return REFUSED
+			return FILELIMIT
 		}
 	}
 	return ERROR
