@@ -24,7 +24,17 @@ const (
 
 var cb *cyclicbarrier.CyclicBarrier
 
+var prevStat = map[Proto]map[NetOper]map[NetErr]int64{}
+var totalStat = map[Proto]map[NetOper]map[NetErr]int64{}
+var startTimestamp int64
 var stat = map[Proto]map[NetOper]map[NetErr]int64{}
+var aggrTime int
+var aggrTimestamp int64
+var endTimestamp int64
+
+const aggrHeader = "time\tproto\tconn/s\tconn err/s\tsend/s\tsend err/s\tconn tout/s\tconn reset/s\tconn refused/s\tsend tout/s\tsend reset/s\n"
+
+//func pintStat(
 
 var running = true
 
@@ -53,20 +63,46 @@ type config struct {
 
 	StatFile   string // write connections stat to file
 	DetailFile string // write sended metrics to file
+	AggrFile   string // write aggregated connections stat to file
 	CPUProf    string // write cpu profile info to file
 }
 
 const header = "timestamp\tConId\tProto\tType\tStatus\tElapsed\tSize\n"
 
-func printStat(stat map[Proto]map[NetOper]map[NetErr]int64, duration time.Duration) {
+func mergeStat(dest map[Proto]map[NetOper]map[NetErr]int64, source map[Proto]map[NetOper]map[NetErr]int64) {
+	for k1, v1 := range source {
+		_, ok := dest[k1]
+		if !ok {
+			dest[k1] = map[NetOper]map[NetErr]int64{}
+		}
+		for k2, v2 := range v1 {
+			_, ok := dest[k1][k2]
+			if !ok {
+				dest[k1][k2] = map[NetErr]int64{}
+			}
+			for k3, v3 := range v2 {
+				_, ok := dest[k1][k2]
+				if ok {
+					dest[k1][k2][k3] += v3
+				} else {
+					dest[k1][k2][k3] = v3
+				}
+			}
+		}
+	}
+}
+
+func printStat() {
+
 	// Print stat
 	var statVal []string
+	duration := float64(endTimestamp-startTimestamp) / 1000000000.0
 
-	for proto, opers := range stat {
+	for proto, opers := range totalStat {
 		for oper, errors := range opers {
 			for error, s := range errors {
-				v := fmt.Sprintf("%s.%s.%s %d (%d/s)\n", ProtoToString(proto), NetOperToString(oper), NetErrToString(error),
-					s, s/(duration.Nanoseconds()/1000000000))
+				v := fmt.Sprintf("%s.%s.%s %d (%.2f/s)\n", ProtoToString(proto), NetOperToString(oper), NetErrToString(error),
+					s, float64(s)/duration)
 				statVal = append(statVal, v)
 			}
 		}
@@ -76,6 +112,102 @@ func printStat(stat map[Proto]map[NetOper]map[NetErr]int64, duration time.Durati
 	for _, s := range statVal {
 		fmt.Print(s)
 	}
+}
+
+func printAggrStat(w *bufio.Writer, timeStamp int64, duration float64, workers int, uworkers int) {
+	//timeStr := time.Unix(timeStamp/1000000000, 0).Format("2006-01-02T15:04:05-0700")
+	timeStr := time.Unix(timeStamp/1000000000, 0).Format(time.RFC3339)
+	if workers > 0 {
+		sProto, ok := stat[TCP]
+		if !ok {
+			fmt.Fprintf(w, "%s\t%s\t%.2f\t%.2f\t%.2f\t%.2f\t%.2f\t%.2f\t%.2f\t%.2f\t%.2f\t\n",
+				timeStr, "TCP", 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0)
+
+		} else {
+			var sConnOk int64
+			var sConnErr int64
+			var sConnTOut int64
+			var sConnReset int64
+			var sConnRefused int64
+			for k, v := range sProto[CONNECT] {
+				if k == OK {
+					sConnOk = v
+				} else {
+					sConnErr += v
+					switch k {
+					case TIMEOUT:
+						sConnTOut = v
+						break
+					case RESET:
+						sConnReset = v
+						break
+					case REFUSED:
+						sConnRefused = v
+						break
+					}
+				}
+			}
+
+			var sSendOk int64
+			var sSendErr int64
+			var sSendTOut int64
+			var sSendReset int64
+			for k, v := range sProto[SEND] {
+				if k == OK {
+					sSendOk = v
+				} else {
+					sSendErr += v
+					switch k {
+					case TIMEOUT:
+						sSendTOut = v
+						break
+					case RESET:
+						sSendReset = v
+						break
+					}
+				}
+			}
+			fmt.Fprintf(w, "%s\t%s\t%.2f\t%.2f\t%.2f\t%.2f\t%.2f\t%.2f\t%.2f\t%.2f\t%.2f\n",
+				timeStr, "TCP",
+				float64(sConnOk)/duration, float64(sConnErr)/duration,
+				float64(sSendOk)/duration, float64(sSendErr)/duration,
+				float64(sConnTOut)/duration, float64(sConnReset)/duration, float64(sConnRefused)/duration,
+				float64(sSendTOut)/duration, float64(sSendReset)/duration)
+		}
+	}
+	if uworkers > 0 {
+		sProto, ok := stat[UDP]
+		if !ok {
+			fmt.Fprintf(w, "%s\t%s\t-\t-\t%.2f\t%.2f\t-\t-\t-\t%.2f\t%.2f\n",
+				timeStr, "UDP", 0.0, 0.0, 0.0, 0.0)
+
+		} else {
+			var sSendOk int64
+			var sSendErr int64
+			var sSendTOut int64
+			var sSendReset int64
+			for k, v := range sProto[SEND] {
+				if k == OK {
+					sSendOk = v
+				} else {
+					sSendErr += v
+					switch k {
+					case TIMEOUT:
+						sSendTOut = v
+						break
+					case RESET:
+						sSendReset = v
+						break
+					}
+				}
+			}
+			fmt.Fprintf(w, "%s\t%s\t-\t-\t%.2f\t%.2f\t-\t-\t-\t%.2f\t%.2f\n",
+				timeStr, "UDP",
+				float64(sSendOk)/duration, float64(sSendErr)/duration,
+				float64(sSendTOut)/duration, float64(sSendReset)/duration)
+		}
+	}
+	w.Flush()
 }
 
 func parseArgs() (config, error) {
@@ -110,8 +242,9 @@ func parseArgs() (config, error) {
 
 	flag.BoolVar(&config.Verbose, "verbose", false, "verbose")
 
-	flag.StringVar(&config.StatFile, "stat", "test.csv", "stat file (appended)")
-	flag.StringVar(&config.DetailFile, "detail", "", "detail file (appended)")
+	flag.StringVar(&config.StatFile, "stat", "", "stat file")
+	flag.StringVar(&config.AggrFile, "aggr", "", "sended metrics file (appended)")
+	flag.StringVar(&config.DetailFile, "detail", "", "sended metrics file (appended)")
 
 	flag.StringVar(&config.CPUProf, "cpuprofile", "", "write cpu profile to file")
 
@@ -200,42 +333,59 @@ func parseArgs() (config, error) {
 }
 
 func main() {
+	argsHead := "### " + strings.Join(os.Args, " ") + "\n"
 	config, err := parseArgs()
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "%s\n", err.Error())
 		os.Exit(1)
 	}
 
-	if _, err := os.Stat(config.StatFile); err == nil || !os.IsNotExist(err) {
-		fmt.Fprintf(os.Stderr, "file %s already exist\n", config.StatFile)
-		os.Exit(1)
-	}
+	var file *os.File
+	var w *bufio.Writer
 
-	file, err := os.OpenFile(config.StatFile, os.O_CREATE|os.O_RDWR, 0777)
-	if err != nil {
-		fmt.Fprintf(os.Stderr, "%s\n", err.Error())
-		os.Exit(2)
-	}
-	defer file.Close()
-	w := bufio.NewWriter(file)
-	_, err = w.WriteString(header)
-	if err != nil {
-		fmt.Fprintf(os.Stderr, "%s\n", err.Error())
-		os.Exit(2)
+	if config.StatFile != "" {
+		file, err = os.OpenFile(config.StatFile, os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0644)
+		if err != nil {
+			fmt.Fprintf(os.Stderr, "%s\n", err.Error())
+			os.Exit(2)
+		}
+		defer file.Close()
+		w = bufio.NewWriter(file)
+		w.WriteString(argsHead)
+		_, err = w.WriteString(header)
+		if err != nil {
+			fmt.Fprintf(os.Stderr, "%s\n", err.Error())
+			os.Exit(2)
+		}
 	}
 
 	var dFile *os.File
 	var dw *bufio.Writer
 
 	if config.DetailFile != "" {
-		dFile, err = os.OpenFile(config.DetailFile, os.O_CREATE|os.O_RDWR, 0777)
+		dFile, err = os.OpenFile(config.DetailFile, os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0644)
 		if err != nil {
 			fmt.Fprintf(os.Stderr, "%s\n", err.Error())
 			os.Exit(2)
 		}
 		defer dFile.Close()
 		dw = bufio.NewWriter(dFile)
-		_, err = w.WriteString(header)
+		dw.WriteString(argsHead)
+	}
+
+	var aFile *os.File
+	var aw *bufio.Writer
+
+	if config.AggrFile != "" {
+		aFile, err = os.OpenFile(config.AggrFile, os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0644)
+		if err != nil {
+			fmt.Fprintf(os.Stderr, "%s\n", err.Error())
+			os.Exit(2)
+		}
+		defer aFile.Close()
+		aw = bufio.NewWriter(aFile)
+		aw.WriteString(argsHead)
+		_, err = aw.WriteString(aggrHeader)
 		if err != nil {
 			fmt.Fprintf(os.Stderr, "%s\n", err.Error())
 			os.Exit(2)
@@ -265,13 +415,9 @@ func main() {
 		go UDPWorker(i, config, result, mdetail)
 	}
 
+	// Test duration
 	go func() {
-		//rLimitCount := len(config.RateLimit)
-		//if rLimitCount == 0 {
 		time.Sleep(config.Duration)
-		//} else {
-
-		//}
 		log.Printf("Shutting down")
 		running = false
 	}()
@@ -280,6 +426,8 @@ func main() {
 
 	log.Printf("Starting TCP workers: %d, UDP %d\n", config.Workers, config.UWorkers)
 	cb.Await()
+
+	const aggrDuration = 60
 
 LOOP:
 	for {
@@ -293,23 +441,44 @@ LOOP:
 			if r.TimeStamp == 0 {
 				if r.Proto == TCP {
 					workers--
-					//if workers == 0 {
-					//duration = time.Since(start)
-					//}
 				} else {
 					uworkers--
-					//if uworkers == 0 {
-					//uduration = time.Since(start)
-					//}
 				}
 				if workers <= 0 && uworkers <= 0 {
 					break LOOP
 				}
 			} else {
+				if r.TimeStamp+r.Elapsed > endTimestamp {
+					endTimestamp = r.TimeStamp + r.Elapsed
+				}
+				if r.TimeStamp < startTimestamp || startTimestamp == 0 {
+					startTimestamp = r.TimeStamp
+				}
+
+				if aw != nil {
+					// round to minute
+					endTime := int(endTimestamp / (1000 * 1000 * 1000 * aggrDuration))
+					if endTime > aggrTime {
+						// flush aggregated stat
+						if aggrTime > 0 {
+							printAggrStat(aw, aggrTimestamp, float64(endTimestamp-aggrTimestamp)/1000000000.0, config.Workers, config.UWorkers)
+						}
+						aggrTimestamp = endTimestamp
+						aggrTime = endTime
+
+						// merge stat
+						mergeStat(totalStat, stat)
+
+						stat = make(map[Proto]map[NetOper]map[NetErr]int64)
+					}
+				}
 				// write to stat file
-				fmt.Fprintf(w, "%d\t%d\t%s\t%s\t%s\t%d\t%d\n", r.TimeStamp/1000, r.Id,
-					ProtoToString(r.Proto), NetOperToString(r.Type),
-					NetErrToString(r.Error), r.Elapsed/1000, r.Size)
+				if w != nil {
+					timeStr := time.Unix(r.TimeStamp/1000000000, r.TimeStamp%1000000000).Format(time.RFC3339Nano)
+					fmt.Fprintf(w, "%s\t%d\t%s\t%s\t%s\t%d\t%d\n", timeStr, r.Id,
+						ProtoToString(r.Proto), NetOperToString(r.Type),
+						NetErrToString(r.Error), r.Elapsed/1000, r.Size)
+				}
 
 				sProto, ok := stat[r.Proto]
 				if !ok {
@@ -330,12 +499,32 @@ LOOP:
 			}
 		}
 	}
-	duration := time.Since(start)
-	err = w.Flush()
-	if err != nil {
-		panic(err)
+	end := time.Now()
+	duration := end.Sub(start)
+	log.Printf("Shutdown. Test Duration %s", duration)
+	if config.AggrFile != "" {
+		fmt.Printf("aggregated results writed to %s\n", config.AggrFile)
+	}
+	if config.StatFile != "" {
+		fmt.Printf("results writed to %s\n", config.StatFile)
 	}
 	if config.DetailFile != "" {
+		fmt.Printf("sended metrics writed to %s\n", config.DetailFile)
+	}
+	if len(stat) > 0 {
+		mergeStat(totalStat, stat)
+		printAggrStat(aw, aggrTimestamp, float64(endTimestamp-aggrTimestamp)/1000000000.0, config.Workers, config.UWorkers)
+	}
+
+	printStat()
+
+	if w != nil {
+		err = w.Flush()
+		if err != nil {
+			panic(err)
+		}
+	}
+	if dw != nil {
 		for len(mdetail) > 0 {
 			r := <-mdetail
 			_, err = dw.WriteString(r)
@@ -348,7 +537,10 @@ LOOP:
 			panic(err)
 		}
 	}
-	log.Printf("Shutdown, results writed to %s. Test duration %s", config.StatFile, duration)
-
-	printStat(stat, duration)
+	if aw != nil {
+		err = aw.Flush()
+		if err != nil {
+			panic(err)
+		}
+	}
 }

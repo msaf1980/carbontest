@@ -115,7 +115,7 @@ type ConStat struct {
 	Id        int
 	Proto     Proto
 	Type      NetOper
-	TimeStamp int64
+	TimeStamp int64 // nanosec
 	Elapsed   int64
 	Error     NetErr
 	Size      int
