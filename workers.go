@@ -17,7 +17,7 @@ type CompressType int
 const (
 	NONE CompressType = iota
 	GZIP
-	LZ4
+	//LZ4
 )
 
 type NetOper int
@@ -25,7 +25,7 @@ type NetOper int
 const (
 	CONNECT NetOper = iota
 	SEND
-	RECV
+	//RECV
 )
 
 var NetOperStrings = [...]string{
@@ -135,25 +135,6 @@ func (r *ConStat) ConStatZero() {
 	r.Error = OK
 }
 
-//func (r *Result) Duration() time.Duration {
-//if r.Connect.Time <= 0 {
-//return 0
-//}
-//d := r.Connect.Time
-//for i := range r.Send {
-//if r.Send[i].Time > 0 {
-//d += r.Send[i].Time
-//}
-//}
-//return d
-//}
-
-type Worker struct {
-	out chan string // A channel to communicate to the routine
-	//Interval time.Duration // The interval with which to run the Action
-	//period   time.Duration // The actual period of the wait
-}
-
 func RandomDuration(min time.Duration, max time.Duration) time.Duration {
 	if max > min {
 		return time.Duration(rand.Int63n(max.Nanoseconds()-min.Nanoseconds())+min.Nanoseconds()) * time.Nanosecond
@@ -201,13 +182,15 @@ func TcpWorker(id int, config config, out chan<- ConStat, mdetail chan<- string)
 			for j := 0; running && j < config.MetricPerCon; j++ {
 				metricString := fmt.Sprintf("%s.%dtest%d %d %d\n", metricPrefix, j, id, j, start.Unix())
 				start = time.Now()
-				con.SetDeadline(start.Add(config.SendTimeout))
-				r.Size, err = w.Write([]byte(metricString))
+				err = con.SetDeadline(start.Add(config.SendTimeout))
 				if err == nil {
-					if config.Compress == GZIP {
-						err = w.(*gzip.Writer).Flush()
-					} else {
-						err = w.(*bufio.Writer).Flush()
+					r.Size, err = w.Write([]byte(metricString))
+					if err == nil {
+						if config.Compress == GZIP {
+							err = w.(*gzip.Writer).Flush()
+						} else {
+							err = w.(*bufio.Writer).Flush()
+						}
 					}
 				}
 
@@ -278,7 +261,7 @@ func UDPWorker(id int, config config, out chan<- ConStat, mdetail chan<- string)
 			start := time.Now()
 			con, conError := net.Dial("udp", config.Addr)
 			if conError == nil {
-				sended, err := fmt.Fprintf(con, metricString)
+				sended, err := fmt.Fprint(con, metricString)
 				con.Close()
 				r.Error = NetError(err)
 				r.Size = sended

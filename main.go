@@ -18,13 +18,8 @@ import (
 	"go.uber.org/ratelimit"
 )
 
-const (
-	maxBuf = 1000
-)
-
 var cb *cyclicbarrier.CyclicBarrier
 
-var prevStat = map[Proto]map[NetOper]map[NetErr]int64{}
 var totalStat = map[Proto]map[NetOper]map[NetErr]int64{}
 var startTimestamp int64
 var stat = map[Proto]map[NetOper]map[NetErr]int64{}
@@ -137,13 +132,10 @@ func printAggrStat(w *bufio.Writer, timeStamp int64, duration float64, workers i
 					switch k {
 					case TIMEOUT:
 						sConnTOut = v
-						break
 					case RESET:
 						sConnReset = v
-						break
 					case REFUSED:
 						sConnRefused = v
-						break
 					}
 				}
 			}
@@ -160,10 +152,8 @@ func printAggrStat(w *bufio.Writer, timeStamp int64, duration float64, workers i
 					switch k {
 					case TIMEOUT:
 						sSendTOut = v
-						break
 					case RESET:
 						sSendReset = v
-						break
 					}
 				}
 			}
@@ -194,10 +184,8 @@ func printAggrStat(w *bufio.Writer, timeStamp int64, duration float64, workers i
 					switch k {
 					case TIMEOUT:
 						sSendTOut = v
-						break
 					case RESET:
 						sSendReset = v
-						break
 					}
 				}
 			}
@@ -351,7 +339,11 @@ func main() {
 		}
 		defer file.Close()
 		w = bufio.NewWriter(file)
-		w.WriteString(argsHead)
+		_, err = w.WriteString(argsHead)
+		if err != nil {
+			fmt.Fprintf(os.Stderr, "%s\n", err.Error())
+			os.Exit(2)
+		}
 		_, err = w.WriteString(header)
 		if err != nil {
 			fmt.Fprintf(os.Stderr, "%s\n", err.Error())
@@ -370,7 +362,11 @@ func main() {
 		}
 		defer dFile.Close()
 		dw = bufio.NewWriter(dFile)
-		dw.WriteString(argsHead)
+		_, err = dw.WriteString(argsHead)
+		if err != nil {
+			fmt.Fprintf(os.Stderr, "%s\n", err.Error())
+			os.Exit(2)
+		}
 	}
 
 	var aFile *os.File
@@ -384,7 +380,11 @@ func main() {
 		}
 		defer aFile.Close()
 		aw = bufio.NewWriter(aFile)
-		aw.WriteString(argsHead)
+		_, err = aw.WriteString(argsHead)
+		if err != nil {
+			fmt.Fprintf(os.Stderr, "%s\n", err.Error())
+			os.Exit(2)
+		}
 		_, err = aw.WriteString(aggrHeader)
 		if err != nil {
 			fmt.Fprintf(os.Stderr, "%s\n", err.Error())
@@ -397,7 +397,7 @@ func main() {
 		if err != nil {
 			fmt.Fprintf(os.Stderr, "%s\n", err.Error())
 		}
-		pprof.StartCPUProfile(f)
+		_ = pprof.StartCPUProfile(f)
 		defer pprof.StopCPUProfile()
 	}
 
@@ -461,7 +461,9 @@ LOOP:
 					if endTime > aggrTime {
 						// flush aggregated stat
 						if aggrTime > 0 {
-							printAggrStat(aw, aggrTimestamp, float64(endTimestamp-aggrTimestamp)/1000000000.0, config.Workers, config.UWorkers)
+							if aw != nil {
+								printAggrStat(aw, aggrTimestamp, float64(endTimestamp-aggrTimestamp)/1000000000.0, config.Workers, config.UWorkers)
+							}
 						}
 						aggrTimestamp = endTimestamp
 						aggrTime = endTime
@@ -513,7 +515,9 @@ LOOP:
 	}
 	if len(stat) > 0 {
 		mergeStat(totalStat, stat)
-		printAggrStat(aw, aggrTimestamp, float64(endTimestamp-aggrTimestamp)/1000000000.0, config.Workers, config.UWorkers)
+		if aw != nil {
+			printAggrStat(aw, aggrTimestamp, float64(endTimestamp-aggrTimestamp)/1000000000.0, config.Workers, config.UWorkers)
+		}
 	}
 
 	printStat()
