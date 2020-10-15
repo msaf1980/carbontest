@@ -8,120 +8,23 @@ import (
 	"log"
 	"math/rand"
 	"net"
-	"strings"
 	"time"
+
+	"carbontest/pkg/base"
 )
-
-type CompressType int
-
-const (
-	NONE CompressType = iota
-	GZIP
-	//LZ4
-)
-
-type NetOper int
-
-const (
-	CONNECT NetOper = iota
-	SEND
-	//RECV
-)
-
-var NetOperStrings = [...]string{
-	"CONNECT",
-	"SEND",
-	"RECV",
-}
-
-func NetOperToString(oper NetOper) string {
-	return NetOperStrings[oper]
-}
-
-type NetErr int
-
-const (
-	OK NetErr = iota
-	ERROR
-	EOF
-	TIMEOUT
-	LOOKUP
-	REFUSED
-	RESET
-	FILELIMIT
-)
-
-var NetErrStrings = [...]string{
-	"OK",
-	"ERROR",
-	"EOF",
-	"TIMEOUT",
-	"LOOKUP",
-	"REFUSED",
-	"RESET",
-	"FILELIMIT",
-}
-
-func NetErrToString(err NetErr) string {
-	return NetErrStrings[err]
-}
-
-// NetError return short network error description
-func NetError(err error) NetErr {
-	if err == nil {
-		return OK
-	}
-	if err == io.EOF {
-		return EOF
-	}
-	netErr, ok := err.(net.Error)
-	if ok {
-		if netErr.Timeout() {
-			return TIMEOUT
-		} else if strings.Contains(err.Error(), " lookup ") {
-			return LOOKUP
-		} else if strings.HasSuffix(err.Error(), ": connection refused") {
-			return REFUSED
-		} else if strings.HasSuffix(err.Error(), ": connection reset by peer") {
-			return RESET
-		} else if strings.HasSuffix(err.Error(), ": broken pipe") ||
-			strings.HasSuffix(err.Error(), "EOF") {
-			return EOF
-		} else if strings.HasSuffix(err.Error(), ": socket: too many open files") {
-			return FILELIMIT
-		}
-	}
-	return ERROR
-}
-
-type Proto int
-
-const (
-	TCP Proto = iota
-	UDP
-)
-
-var ProtoStrings = [...]string{
-	"TCP",
-	"UDP",
-}
-
-func ProtoToString(proto Proto) string {
-	return ProtoStrings[proto]
-}
 
 // ConStat connection or send statistic
 type ConStat struct {
 	Id        int
-	Proto     Proto
-	Type      NetOper
+	Proto     base.Proto
+	Type      base.NetOper
 	TimeStamp int64 // nanosec
 	Elapsed   int64
-	Error     NetErr
+	Error     base.NetErr
 	Size      int
 }
 
-func ConStatNew(id int, proto Proto) *ConStat {
+func ConStatNew(id int, proto base.Proto) *ConStat {
 	r := new(ConStat)
 	r.Id = id
 	r.Proto = proto
@@ -132,7 +35,7 @@ func (r *ConStat) ConStatZero() {
 	r.TimeStamp = 0
 	r.Size = 0
 	r.Elapsed = 0
-	r.Error = OK
+	r.Error = base.OK
 }
 
 func RandomDuration(min time.Duration, max time.Duration) time.Duration {
@@ -145,7 +48,7 @@ func RandomDuration(min time.Duration, max time.Duration) time.Duration {
 
 func TcpWorker(id int, config config, out chan<- ConStat, mdetail chan<- string) {
 	var err error
-	r := ConStatNew(id, TCP)
+	r := ConStatNew(id, base.TCP)
 
 	defer func(ch chan<- ConStat) {
 		r.ConStatZero()
@@ -167,13 +70,13 @@ func TcpWorker(id int, config config, out chan<- ConStat, mdetail chan<- string)
 		start = time.Now()
 		con, conError := net.DialTimeout("tcp", config.Addr, config.ConTimeout)
 		r.Elapsed = time.Since(start).Nanoseconds()
-		r.Type = CONNECT
-		r.Error = NetError(conError)
+		r.Type = base.CONNECT
+		r.Error = base.NetError(conError)
 		r.TimeStamp = start.UnixNano()
 		r.Size = 0
 		out <- *r
 		if conError == nil {
-			if config.Compress == GZIP {
+			if config.Compress == base.GZIP {
 				w, _ = gzip.NewWriterLevel(con, gzip.DefaultCompression)
 			} else {
 				w = bufio.NewWriter(con)
@@ -186,7 +89,7 @@ func TcpWorker(id int, config config, out chan<- ConStat, mdetail chan<- string)
 				if err == nil {
 					r.Size, err = w.Write([]byte(metricString))
 					if err == nil {
-						if config.Compress == GZIP {
+						if config.Compress == base.GZIP {
 							err = w.(*gzip.Writer).Flush()
 						} else {
 							err = w.(*bufio.Writer).Flush()
@@ -202,8 +105,8 @@ func TcpWorker(id int, config config, out chan<- ConStat, mdetail chan<- string)
 				}
 
 				r.Elapsed = end.Sub(start).Nanoseconds()
-				r.Type = SEND
-				r.Error = NetError(err)
+				r.Type = base.SEND
+				r.Error = base.NetError(err)
 				r.TimeStamp = start.UnixNano()
 				out <- *r
 				if err == nil {
@@ -212,7 +115,7 @@ func TcpWorker(id int, config config, out chan<- ConStat, mdetail chan<- string)
 					}
 					count++
 				} else {
-					if config.Verbose && r.Error == ERROR {
+					if config.Verbose && r.Error == base.ERROR {
 						log.Print(conError)
 					}
 					con.Close()
@@ -221,7 +124,7 @@ func TcpWorker(id int, config config, out chan<- ConStat, mdetail chan<- string)
 			}
 			con.Close()
 		} else {
-			if config.Verbose && r.Error == ERROR {
+			if config.Verbose && r.Error == base.ERROR {
 				log.Print(conError)
 			}
 			if config.SendDelayMax > 0 {
@@ -237,8 +140,8 @@ func TcpWorker(id int, config config, out chan<- ConStat, mdetail chan<- string)
 }
 
 func UDPWorker(id int, config config, out chan<- ConStat, mdetail chan<- string) {
-	r := ConStatNew(id, UDP)
-	r.Type = SEND
+	r := ConStatNew(id, base.UDP)
+	r.Type = base.SEND
 
 	defer func(ch chan<- ConStat) {
 		r.ConStatZero()
@@ -263,7 +166,7 @@ func UDPWorker(id int, config config, out chan<- ConStat, mdetail chan<- string)
 			if conError == nil {
 				sended, err := fmt.Fprint(con, metricString)
 				con.Close()
-				r.Error = NetError(err)
+				r.Error = base.NetError(err)
 				r.Size = sended
 				if err == nil {
 					if config.DetailFile != "" {
@@ -272,7 +175,7 @@ func UDPWorker(id int, config config, out chan<- ConStat, mdetail chan<- string)
 					count++
 				}
 			} else {
-				r.Error = NetError(conError)
+				r.Error = base.NetError(conError)
 				r.Size = 0
 			}
 

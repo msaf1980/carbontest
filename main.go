@@ -16,13 +16,15 @@ import (
 
 	"github.com/msaf1980/cyclicbarrier"
 	"go.uber.org/ratelimit"
+
+	"carbontest/pkg/base"
 )
 
 var cb *cyclicbarrier.CyclicBarrier
 
-var totalStat = map[Proto]map[NetOper]map[NetErr]int64{}
+var totalStat = map[base.Proto]map[base.NetOper]map[base.NetErr]int64{}
 var startTimestamp int64
-var stat = map[Proto]map[NetOper]map[NetErr]int64{}
+var stat = map[base.Proto]map[base.NetOper]map[base.NetErr]int64{}
 var aggrTime int
 var aggrTimestamp int64
 var endTimestamp int64
@@ -41,7 +43,7 @@ type config struct {
 	MetricPerCon int
 	BatchSend    int
 
-	Compress CompressType
+	Compress base.CompressType
 
 	SendDelayMin time.Duration
 	SendDelayMax time.Duration
@@ -64,16 +66,16 @@ type config struct {
 
 const header = "timestamp\tConId\tProto\tType\tStatus\tElapsed\tSize\n"
 
-func mergeStat(dest map[Proto]map[NetOper]map[NetErr]int64, source map[Proto]map[NetOper]map[NetErr]int64) {
+func mergeStat(dest map[base.Proto]map[base.NetOper]map[base.NetErr]int64, source map[base.Proto]map[base.NetOper]map[base.NetErr]int64) {
 	for k1, v1 := range source {
 		_, ok := dest[k1]
 		if !ok {
-			dest[k1] = map[NetOper]map[NetErr]int64{}
+			dest[k1] = map[base.NetOper]map[base.NetErr]int64{}
 		}
 		for k2, v2 := range v1 {
 			_, ok := dest[k1][k2]
 			if !ok {
-				dest[k1][k2] = map[NetErr]int64{}
+				dest[k1][k2] = map[base.NetErr]int64{}
 			}
 			for k3, v3 := range v2 {
 				_, ok := dest[k1][k2]
@@ -96,7 +98,7 @@ func printStat() {
 	for proto, opers := range totalStat {
 		for oper, errors := range opers {
 			for error, s := range errors {
-				v := fmt.Sprintf("%s.%s.%s %d (%.2f/s)\n", ProtoToString(proto), NetOperToString(oper), NetErrToString(error),
+				v := fmt.Sprintf("%s.%s.%s %d (%.2f/s)\n", proto.String, oper.String(), error.String(),
 					s, float64(s)/duration)
 				statVal = append(statVal, v)
 			}
@@ -113,7 +115,7 @@ func printAggrStat(w *bufio.Writer, timeStamp int64, duration float64, workers i
 	//timeStr := time.Unix(timeStamp/1000000000, 0).Format("2006-01-02T15:04:05-0700")
 	timeStr := time.Unix(timeStamp/1000000000, 0).Format(time.RFC3339)
 	if workers > 0 {
-		sProto, ok := stat[TCP]
+		sProto, ok := stat[base.TCP]
 		if !ok {
 			fmt.Fprintf(w, "%s\t%s\t%.2f\t%.2f\t%.2f\t%.2f\t%.2f\t%.2f\t%.2f\t%.2f\t%.2f\t\n",
 				timeStr, "TCP", 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0)
@@ -124,17 +126,17 @@ func printAggrStat(w *bufio.Writer, timeStamp int64, duration float64, workers i
 			var sConnTOut int64
 			var sConnReset int64
 			var sConnRefused int64
-			for k, v := range sProto[CONNECT] {
-				if k == OK {
+			for k, v := range sProto[base.CONNECT] {
+				if k == base.OK {
 					sConnOk = v
 				} else {
 					sConnErr += v
 					switch k {
-					case TIMEOUT:
+					case base.TIMEOUT:
 						sConnTOut = v
-					case RESET:
+					case base.RESET:
 						sConnReset = v
-					case REFUSED:
+					case base.REFUSED:
 						sConnRefused = v
 					}
 				}
@@ -144,15 +146,15 @@ func printAggrStat(w *bufio.Writer, timeStamp int64, duration float64, workers i
 			var sSendErr int64
 			var sSendTOut int64
 			var sSendReset int64
-			for k, v := range sProto[SEND] {
-				if k == OK {
+			for k, v := range sProto[base.SEND] {
+				if k == base.OK {
 					sSendOk = v
 				} else {
 					sSendErr += v
 					switch k {
-					case TIMEOUT:
+					case base.TIMEOUT:
 						sSendTOut = v
-					case RESET:
+					case base.RESET:
 						sSendReset = v
 					}
 				}
@@ -166,7 +168,7 @@ func printAggrStat(w *bufio.Writer, timeStamp int64, duration float64, workers i
 		}
 	}
 	if uworkers > 0 {
-		sProto, ok := stat[UDP]
+		sProto, ok := stat[base.UDP]
 		if !ok {
 			fmt.Fprintf(w, "%s\t%s\t-\t-\t%.2f\t%.2f\t-\t-\t-\t%.2f\t%.2f\n",
 				timeStr, "UDP", 0.0, 0.0, 0.0, 0.0)
@@ -176,15 +178,15 @@ func printAggrStat(w *bufio.Writer, timeStamp int64, duration float64, workers i
 			var sSendErr int64
 			var sSendTOut int64
 			var sSendReset int64
-			for k, v := range sProto[SEND] {
-				if k == OK {
+			for k, v := range sProto[base.SEND] {
+				if k == base.OK {
 					sSendOk = v
 				} else {
 					sSendErr += v
 					switch k {
-					case TIMEOUT:
+					case base.TIMEOUT:
 						sSendTOut = v
-					case RESET:
+					case base.RESET:
 						sSendReset = v
 					}
 				}
@@ -308,9 +310,9 @@ func parseArgs() (config, error) {
 
 	compressType = strings.ToLower(compressType)
 	if compressType == "" {
-		config.Compress = NONE
+		config.Compress = base.NONE
 	} else if compressType == "gzip" {
-		config.Compress = GZIP
+		config.Compress = base.GZIP
 	} else {
 		return config, fmt.Errorf("Invalid compress type: %s", compressType)
 	}
@@ -439,7 +441,7 @@ LOOP:
 			}
 		case r := <-result:
 			if r.TimeStamp == 0 {
-				if r.Proto == TCP {
+				if r.Proto == base.TCP {
 					workers--
 				} else {
 					uworkers--
@@ -471,25 +473,25 @@ LOOP:
 						// merge stat
 						mergeStat(totalStat, stat)
 
-						stat = make(map[Proto]map[NetOper]map[NetErr]int64)
+						stat = make(map[base.Proto]map[base.NetOper]map[base.NetErr]int64)
 					}
 				}
 				// write to stat file
 				if w != nil {
 					timeStr := time.Unix(r.TimeStamp/1000000000, r.TimeStamp%1000000000).Format(time.RFC3339Nano)
 					fmt.Fprintf(w, "%s\t%d\t%s\t%s\t%s\t%d\t%d\n", timeStr, r.Id,
-						ProtoToString(r.Proto), NetOperToString(r.Type),
-						NetErrToString(r.Error), r.Elapsed/1000, r.Size)
+						r.Proto.String(), r.Type.String(),
+						r.Error.String(), r.Elapsed/1000, r.Size)
 				}
 
 				sProto, ok := stat[r.Proto]
 				if !ok {
-					sProto = map[NetOper]map[NetErr]int64{}
+					sProto = map[base.NetOper]map[base.NetErr]int64{}
 					stat[r.Proto] = sProto
 				}
 				sOper, ok := sProto[r.Type]
 				if !ok {
-					sOper = map[NetErr]int64{}
+					sOper = map[base.NetErr]int64{}
 					sProto[r.Type] = sOper
 				}
 				_, ok = sOper[r.Error]
