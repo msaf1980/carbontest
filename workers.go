@@ -11,31 +11,6 @@ import (
 	"carbontest/pkg/base"
 )
 
-// ConStat connection or send statistic
-type ConStat struct {
-	Id        int
-	Proto     base.Proto
-	Type      base.NetOper
-	TimeStamp int64 // nanosec
-	Elapsed   int64
-	Error     base.NetErr
-	Size      int
-}
-
-func ConStatNew(id int, proto base.Proto) *ConStat {
-	r := new(ConStat)
-	r.Id = id
-	r.Proto = proto
-	return r
-}
-
-func (r *ConStat) ConStatZero() {
-	r.TimeStamp = 0
-	r.Size = 0
-	r.Elapsed = 0
-	r.Error = base.OK
-}
-
 func RandomDuration(min time.Duration, max time.Duration) time.Duration {
 	if max > min {
 		return time.Duration(rand.Int63n(max.Nanoseconds()-min.Nanoseconds())+min.Nanoseconds()) * time.Nanosecond
