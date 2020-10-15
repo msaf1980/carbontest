@@ -11,32 +11,17 @@ import (
 	"carbontest/pkg/base"
 )
 
-type action int8
-
-const (
-	INIT action = iota
-	CONNECT
-	CLOSE
-	SEND
-)
-
-type Event struct {
-	action    action
-	timestamp int64
-	send      string
-}
-
 type iEvent struct {
 	key       string
 	proto     base.Proto
 	timestamp int64
-	action    action
+	action    base.NetOper
 }
 
 type tcpSet struct {
 	data   *list.List
-	last   int64  // last action timestamp
-	status action // last action
+	last   int64        // last action timestamp
+	status base.NetOper // last action
 }
 
 type Packets struct {
@@ -97,19 +82,19 @@ func (p *Packets) Load(filename string) error {
 				switch fields[5] {
 				case "CONNECT\n":
 					e.key = fields[2] + fields[3] + fields[4]
-					e.action = CONNECT
+					e.action = base.CONNECT
 				case "SEND\n":
 					e.key = fields[2] + fields[3] + fields[4]
-					e.action = SEND
+					e.action = base.SEND
 				case "FIN\n":
 					e.key = fields[2] + fields[3] + fields[4]
-					e.action = CLOSE
+					e.action = base.CLOSE
 				case "RST\n":
 					e.key = fields[4] + fields[3] + fields[2]
-					e.action = CLOSE
+					e.action = base.CLOSE
 				}
 			}
-		} else if e.action == SEND {
+		} else if e.action == base.SEND {
 			sb.WriteString(line)
 		}
 	}
@@ -119,20 +104,20 @@ func (p *Packets) Load(filename string) error {
 
 func (p *Packets) flush(e *iEvent, sb *strings.Builder) {
 	var s string
-	if e.action == INIT {
+	if e.action == base.INIT {
 		return
 	} else if e.proto == base.TCP {
 		v, ok := p.tcpConn[e.key]
 		if !ok {
 			var i int
 			for i = 0; i < len(p.tcp); i++ {
-				if p.tcp[i].status == INIT {
+				if p.tcp[i].status == base.INIT {
 					p.tcp[i].data = list.New()
 					if i > p.maxTCPConnections {
 						p.maxTCPConnections = i + 1
 					}
 					break
-				} else if p.tcp[i].status == CLOSE {
+				} else if p.tcp[i].status == base.CLOSE {
 					break
 				}
 			}
@@ -143,22 +128,22 @@ func (p *Packets) flush(e *iEvent, sb *strings.Builder) {
 				p.tcp = t
 			}
 			p.tcpConn[e.key] = v
-		} else if e.action == CLOSE {
+		} else if e.action == base.CLOSE {
 			delete(p.tcpConn, e.key)
 		}
-		if e.action == SEND {
+		if e.action == base.SEND {
 			s = sb.String()
 			s = s[0 : len(s)-1]
 		}
-		p.tcp[v].data.PushBack(&Event{
-			action:    e.action,
-			timestamp: e.timestamp,
-			send:      s,
+		p.tcp[v].data.PushBack(&base.Event{
+			Action: e.action,
+			Delay:  e.timestamp,
+			Send:   s,
 		})
 		p.tcp[v].last = e.timestamp
 		p.tcp[v].status = e.action
 	}
-	e.action = INIT
+	e.action = base.INIT
 	sb.Reset()
 }
 

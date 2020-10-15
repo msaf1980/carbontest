@@ -1,26 +1,29 @@
 package main
 
 import (
-	"bufio"
-	"compress/gzip"
 	"fmt"
+	"io"
 	"log"
-	"math/rand"
+	"net"
 	"time"
 
 	"carbontest/pkg/base"
+	"carbontest/pkg/metricgen"
 )
 
-func RandomDuration(min time.Duration, max time.Duration) time.Duration {
-	if max > min {
-		return time.Duration(rand.Int63n(max.Nanoseconds()-min.Nanoseconds())+min.Nanoseconds()) * time.Nanosecond
+func delay(config *config, delay int64) time.Time {
+	if config.RateLimiter != nil {
+		return config.RateLimiter.Take()
 	} else {
-		return min
+		end := time.Now()
+		if delay > 0 {
+			time.Sleep(time.Duration(delay))
+		}
+		return end
 	}
 }
 
-func TcpWorker(id int, config config, out chan<- ConStat, mdetail chan<- string) {
-	var err error
+func TcpWorker(id int, c config, out chan<- ConStat, mdetail chan<- string, iter metricgen.MetricIterator) {
 	r := ConStatNew(id, base.TCP)
 
 	defer func(ch chan<- ConStat) {
@@ -28,85 +31,73 @@ func TcpWorker(id int, config config, out chan<- ConStat, mdetail chan<- string)
 		ch <- *r
 	}(out)
 
-	metricPrefix := fmt.Sprintf("%s.worker%d", config.MetricPrefix, id)
 	cb.Await()
-	if config.Verbose {
+	if c.Verbose {
 		log.Printf("Started TCP worker %d\n", id)
 	}
 
 	var count int64
+	var con net.Conn
+	var w io.Writer
+	var err error
 	for running {
 		//r.ResultZero()
-		var start time.Time
-		var end time.Time
-		start = time.Now()
-		con, w, conError := connect("tcp", config.Addr, config.ConTimeout, config.Compress)
-		r.Elapsed = time.Since(start).Nanoseconds()
-		r.Type = base.CONNECT
-		r.Error = base.NetError(conError)
+		//var end time.Time
+		start := time.Now()
+		e := iter.Next(id, start.Unix())
+		if e.Action == base.CLOSE {
+			if con != nil {
+				con.Close()
+				con = nil
+				w = nil
+			}
+		} else if con == nil && e.Action == base.SEND {
+			con, w, err = connectWriter("tcp", c.Addr, c.ConTimeout, c.Compress)
+			r.Elapsed = time.Since(start).Nanoseconds()
+			r.Type = base.CONNECT
+			r.Error = base.NetError(err)
+			r.TimeStamp = start.UnixNano()
+			r.Size = 0
+			out <- *r
+		}
+		if err == nil && e.Action == base.SEND {
+			start = time.Now()
+			err = con.SetDeadline(start.Add(c.SendTimeout))
+			if err == nil {
+				r.Size, err = fmt.Fprint(w, e.Send)
+				if err == nil {
+					err = flushWriter(w, c.Compress)
+				}
+			}
+		}
+		end := delay(&c, e.Delay)
+		r.Elapsed = end.Sub(start).Nanoseconds()
+		r.Type = base.SEND
+		r.Error = base.NetError(err)
 		r.TimeStamp = start.UnixNano()
-		r.Size = 0
 		out <- *r
-		if conError == nil {
-		LOOP_INT:
-			for j := 0; running && j < config.MetricPerCon; j++ {
-				metricString := fmt.Sprintf("%s.%dtest%d %d %d\n", metricPrefix, j, id, j, start.Unix())
-				start = time.Now()
-				err = con.SetDeadline(start.Add(config.SendTimeout))
-				if err == nil {
-					r.Size, err = fmt.Fprint(w, metricString)
-					if err == nil {
-						if config.Compress == base.GZIP {
-							err = w.(*gzip.Writer).Flush()
-						} else {
-							err = w.(*bufio.Writer).Flush()
-						}
-					}
-				}
-
-				if config.SendDelayMax > 0 {
-					end = time.Now()
-					time.Sleep(RandomDuration(config.SendDelayMin, config.SendDelayMax))
-				} else {
-					end = config.RateLimiter.Take()
-				}
-
-				r.Elapsed = end.Sub(start).Nanoseconds()
-				r.Type = base.SEND
-				r.Error = base.NetError(err)
-				r.TimeStamp = start.UnixNano()
-				out <- *r
-				if err == nil {
-					if config.DetailFile != "" {
-						mdetail <- metricString
-					}
-					count++
-				} else {
-					if config.Verbose && r.Error == base.ERROR {
-						log.Print(conError)
-					}
-					con.Close()
-					break LOOP_INT
-				}
+		if err == nil {
+			if c.DetailFile != "" {
+				mdetail <- e.Send
 			}
-			con.Close()
+			count++
 		} else {
-			if config.Verbose && r.Error == base.ERROR {
-				log.Print(conError)
+			if c.Verbose && r.Error == base.ERROR {
+				log.Print(err)
 			}
-			if config.SendDelayMax > 0 {
-				time.Sleep(RandomDuration(config.SendDelayMin, config.SendDelayMax))
-			} else {
-				config.RateLimiter.Take()
+			if con != nil {
+				con.Close()
+				w = nil
+				con = nil
 			}
 		}
 	}
-	if config.Verbose {
+	if c.Verbose {
 		log.Printf("Ended TCP worker %d, %d metrics\n", id, count)
 	}
 }
 
-func UDPWorker(id int, config config, out chan<- ConStat, mdetail chan<- string) {
+func UDPWorker(id int, c config, out chan<- ConStat, mdetail chan<- string, iter metricgen.MetricIterator) {
 	r := ConStatNew(id, base.UDP)
 	r.Type = base.SEND
 
@@ -115,50 +106,64 @@ func UDPWorker(id int, config config, out chan<- ConStat, mdetail chan<- string)
 		ch <- *r
 	}(out)
 
-	metricPrefix := fmt.Sprintf("%s.udpworker%d", config.MetricPrefix, id)
 	cb.Await()
-	if config.Verbose {
+	if c.Verbose {
 		log.Printf("Started UDP worker %d\n", id)
 	}
 
 	var count int64
-	var end time.Time
+	var con net.Conn
+	var w io.Writer
+	var err error
 	for running {
-		for i := 0; running && i < 1000; i++ {
-			timeStamp := time.Now().Unix()
-			metricString := fmt.Sprintf("%s.%d %d %d\n", metricPrefix, i, i, timeStamp)
-
-			start := time.Now()
-			con, w, conError := connect("udp", config.Addr, config.ConTimeout, config.Compress)
-			if conError == nil {
-				sended, err := fmt.Fprint(w, metricString)
+		start := time.Now()
+		e := iter.Next(id, start.Unix())
+		if e.Action == base.CLOSE {
+			if con != nil {
 				con.Close()
-				r.Error = base.NetError(err)
-				r.Size = sended
-				if err == nil {
-					if config.DetailFile != "" {
-						mdetail <- metricString
-					}
-					count++
-				}
-			} else {
-				r.Error = base.NetError(conError)
-				r.Size = 0
+				w = nil
+				con = nil
 			}
-
-			if config.SendDelayMax > 0 {
-				end = time.Now()
-				time.Sleep(RandomDuration(config.SendDelayMin, config.SendDelayMax))
-			} else {
-				end = config.RateLimiter.Take()
-			}
-
-			r.Elapsed = end.Sub(start).Nanoseconds()
+		} else if con == nil && e.Action == base.SEND {
+			start = time.Now()
+			con, w, err = connectWriter("udp", c.Addr, c.ConTimeout, c.Compress)
+			r.Elapsed = time.Since(start).Nanoseconds()
+			r.Type = base.CONNECT
+			r.Error = base.NetError(err)
 			r.TimeStamp = start.UnixNano()
+			r.Size = 0
 			out <- *r
 		}
+
+		if err == nil && e.Action == base.SEND {
+			start = time.Now()
+			sended, err := fmt.Fprint(w, e.Send)
+			flushWriter(w, c.Compress)
+			r.Error = base.NetError(err)
+			r.Size = sended
+			if err == nil {
+				if c.DetailFile != "" {
+					mdetail <- e.Send
+				}
+				count++
+			} else if con != nil {
+				con.Close()
+				w = nil
+				con = nil
+			}
+		} else {
+			r.Error = base.NetError(err)
+			r.Size = 0
+		}
+		end := delay(&c, e.Delay)
+		r.Elapsed = end.Sub(start).Nanoseconds()
+		r.TimeStamp = start.UnixNano()
+		out <- *r
 	}
-	if config.Verbose {
+	if con != nil {
+		con.Close()
+	}
+	if c.Verbose {
 		log.Printf("Ended UDP worker %d, %d metrics\n", id, count)
 	}
 }

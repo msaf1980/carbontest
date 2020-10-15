@@ -33,15 +33,17 @@ const (
 type NetOper int
 
 const (
-	CONNECT NetOper = iota
+	INIT NetOper = iota
+	CONNECT
 	SEND
-	//RECV
+	CLOSE
 )
 
 var NetOperStrings = [...]string{
+	"INIT",
 	"CONNECT",
 	"SEND",
-	"RECV",
+	"CLOSE",
 }
 
 func (oper *NetOper) String() string {
@@ -102,4 +104,10 @@ func NetError(err error) NetErr {
 
 func (err *NetErr) String() string {
 	return NetErrStrings[*err]
+}
+
+type Event struct {
+	Action NetOper
+	Delay  int64
+	Send   string
 }

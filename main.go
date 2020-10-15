@@ -18,6 +18,7 @@ import (
 	"go.uber.org/ratelimit"
 
 	"carbontest/pkg/base"
+	"carbontest/pkg/metricgen"
 )
 
 var cb *cyclicbarrier.CyclicBarrier
@@ -38,10 +39,10 @@ var running = true
 type config struct {
 	Addr string
 	//Connections int
-	Workers      int // TCP Workers
-	Duration     time.Duration
-	MetricPerCon int
-	BatchSend    int
+	Workers   int // TCP Workers
+	Duration  time.Duration
+	Samples   uint
+	BatchSend int
 
 	Compress base.CompressType
 
@@ -218,7 +219,7 @@ func parseArgs() (config, error) {
 	flag.IntVar(&port, "port", 2003, "port")
 	flag.IntVar(&config.Workers, "workers", 10, "TCP workers")
 	flag.StringVar(&duration, "duration", "60s", "total test duration")
-	flag.IntVar(&config.MetricPerCon, "metric", 1, "send metric count in one TCP connection")
+	flag.UintVar(&config.Samples, "samples", 1, "samples for metrics iterator (may be also used as send count in one TCP connection)")
 	//flag.IntVar(&config.BatchSend, "batch", 1, "send metric count in one TCP send")
 	flag.IntVar(&config.UWorkers, "uworkers", 0, "UDP workers (default 0)")
 	//flag.IntVar(&config.UBatchSend, "ubatch", 1, "send metric count in one UDP send")
@@ -247,11 +248,11 @@ func parseArgs() (config, error) {
 	if port < 1 {
 		return config, fmt.Errorf("Invalid port value: %d", port)
 	}
-	if config.Workers < 1 {
+	if config.Workers < 0 {
 		return config, fmt.Errorf("Invalid TCP workers value: %d", config.Workers)
 	}
-	if config.MetricPerCon < 1 {
-		return config, fmt.Errorf("Invalid TCP metric value: %d", config.MetricPerCon)
+	if config.Samples < 1 {
+		return config, fmt.Errorf("Invalid iterations value: %d", config.Samples)
 	}
 	/*
 		if config.BatchSend < 1 {
@@ -260,6 +261,10 @@ func parseArgs() (config, error) {
 	*/
 	if config.UWorkers < 0 {
 		return config, fmt.Errorf("Invalid UDP workers value: %d", config.Workers)
+	}
+
+	if config.Workers < 0 && config.UWorkers < 0 {
+		return config, fmt.Errorf("Set TCP or UDP workers")
 	}
 
 	splitSendDelay := strings.Split(sendDelay, ":")
@@ -290,7 +295,7 @@ func parseArgs() (config, error) {
 		}
 		config.RateLimiter = ratelimit.New(rateLimit)
 	} else {
-		config.RateLimiter = ratelimit.NewUnlimited()
+		config.RateLimiter = nil
 	}
 
 	config.SendTimeout, err = time.ParseDuration(sendTimeout)
@@ -410,11 +415,19 @@ func main() {
 
 	cb = cyclicbarrier.New(config.Workers + config.UWorkers + 1)
 
-	for i := 0; i < config.Workers; i++ {
-		go TcpWorker(i, config, result, mdetail)
+	if config.Workers > 0 {
+		titer := metricgen.New(config.MetricPrefix+".tcp", config.Workers, config.Samples,
+			config.SendDelayMin.Nanoseconds(), config.SendDelayMax.Nanoseconds())
+		for i := 0; i < config.Workers; i++ {
+			go TcpWorker(i, config, result, mdetail, titer)
+		}
 	}
-	for i := 0; i < config.UWorkers; i++ {
-		go UDPWorker(i, config, result, mdetail)
+	if config.UWorkers > 0 {
+		uiter := metricgen.New(config.MetricPrefix+".udp", config.UWorkers, config.Samples,
+			config.SendDelayMin.Nanoseconds(), config.SendDelayMax.Nanoseconds())
+		for i := 0; i < config.UWorkers; i++ {
+			go UDPWorker(i, config, result, mdetail, uiter)
+		}
 	}
 
 	// Test duration
