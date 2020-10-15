@@ -14,6 +14,9 @@ $(NAME): FORCE
 debug: FORCE
 	$(GO) build -gcflags=all='-N -l' -ldflags "-X main.version=${VERSION}"
 
+test: FORCE
+	$(GO) test -coverprofile coverage.txt  ./...
+
 clean:
 	@rm -f ./${NAME}
 
