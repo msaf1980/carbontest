@@ -1,7 +1,6 @@
 package main
 
 import (
-	"fmt"
 	"io"
 	"log"
 	"net"
@@ -64,9 +63,12 @@ func TcpWorker(id int, c config, out chan<- ConStat, mdetail chan<- string, iter
 			start = time.Now()
 			err = con.SetDeadline(start.Add(c.SendTimeout))
 			if err == nil {
-				r.Size, err = fmt.Fprint(w, e.Send)
+				//r.Size, err = fmt.Fprint(w, e.Send)
+				r.Size, err = w.Write([]byte(e.Send))
 				if err == nil {
-					err = flushWriter(w, c.Compress)
+					if err = flushWriter(w, c.Compress); err == nil {
+						count++
+					}
 				}
 			}
 		}
@@ -80,7 +82,6 @@ func TcpWorker(id int, c config, out chan<- ConStat, mdetail chan<- string, iter
 			if c.DetailFile != "" {
 				mdetail <- e.Send
 			}
-			count++
 		} else {
 			if c.Verbose && r.Error == base.ERROR {
 				log.Print(err)
@@ -137,7 +138,8 @@ func UDPWorker(id int, c config, out chan<- ConStat, mdetail chan<- string, iter
 
 		if err == nil && e.Action == base.SEND {
 			start = time.Now()
-			sended, err := fmt.Fprint(w, e.Send)
+			//sended, err := fmt.Fprint(w, e.Send)
+			sended, err := w.Write([]byte(e.Send))
 			flushWriter(w, c.Compress)
 			r.Error = base.NetError(err)
 			r.Size = sended
