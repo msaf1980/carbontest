@@ -4,10 +4,8 @@ import (
 	"bufio"
 	"compress/gzip"
 	"fmt"
-	"io"
 	"log"
 	"math/rand"
-	"net"
 	"time"
 
 	"carbontest/pkg/base"
@@ -62,13 +60,12 @@ func TcpWorker(id int, config config, out chan<- ConStat, mdetail chan<- string)
 	}
 
 	var count int64
-	var w io.Writer
 	for running {
 		//r.ResultZero()
 		var start time.Time
 		var end time.Time
 		start = time.Now()
-		con, conError := net.DialTimeout("tcp", config.Addr, config.ConTimeout)
+		con, w, conError := connect("tcp", config.Addr, config.ConTimeout, config.Compress)
 		r.Elapsed = time.Since(start).Nanoseconds()
 		r.Type = base.CONNECT
 		r.Error = base.NetError(conError)
@@ -76,18 +73,13 @@ func TcpWorker(id int, config config, out chan<- ConStat, mdetail chan<- string)
 		r.Size = 0
 		out <- *r
 		if conError == nil {
-			if config.Compress == base.GZIP {
-				w, _ = gzip.NewWriterLevel(con, gzip.DefaultCompression)
-			} else {
-				w = bufio.NewWriter(con)
-			}
 		LOOP_INT:
 			for j := 0; running && j < config.MetricPerCon; j++ {
 				metricString := fmt.Sprintf("%s.%dtest%d %d %d\n", metricPrefix, j, id, j, start.Unix())
 				start = time.Now()
 				err = con.SetDeadline(start.Add(config.SendTimeout))
 				if err == nil {
-					r.Size, err = w.Write([]byte(metricString))
+					r.Size, err = fmt.Fprint(w, metricString)
 					if err == nil {
 						if config.Compress == base.GZIP {
 							err = w.(*gzip.Writer).Flush()
@@ -162,9 +154,9 @@ func UDPWorker(id int, config config, out chan<- ConStat, mdetail chan<- string)
 			metricString := fmt.Sprintf("%s.%d %d %d\n", metricPrefix, i, i, timeStamp)
 
 			start := time.Now()
-			con, conError := net.Dial("udp", config.Addr)
+			con, w, conError := connect("udp", config.Addr, config.ConTimeout, config.Compress)
 			if conError == nil {
-				sended, err := fmt.Fprint(con, metricString)
+				sended, err := fmt.Fprint(w, metricString)
 				con.Close()
 				r.Error = base.NetError(err)
 				r.Size = sended
