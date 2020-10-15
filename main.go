@@ -41,7 +41,7 @@ type config struct {
 	//Connections int
 	Workers   int // TCP Workers
 	Duration  time.Duration
-	Samples   uint
+	Samples   int
 	BatchSend int
 
 	Compress base.CompressType
@@ -219,7 +219,7 @@ func parseArgs() (config, error) {
 	flag.IntVar(&port, "port", 2003, "port")
 	flag.IntVar(&config.Workers, "workers", 10, "TCP workers")
 	flag.StringVar(&duration, "duration", "60s", "total test duration")
-	flag.UintVar(&config.Samples, "samples", 1, "samples for metrics iterator (may be also used as send count in one TCP connection)")
+	flag.IntVar(&config.Samples, "samples", 1, "samples for metrics iterator (may be also used as send count in one TCP connection)")
 	//flag.IntVar(&config.BatchSend, "batch", 1, "send metric count in one TCP send")
 	flag.IntVar(&config.UWorkers, "uworkers", 0, "UDP workers (default 0)")
 	//flag.IntVar(&config.UBatchSend, "ubatch", 1, "send metric count in one UDP send")
@@ -252,7 +252,7 @@ func parseArgs() (config, error) {
 		return config, fmt.Errorf("Invalid TCP workers value: %d", config.Workers)
 	}
 	if config.Samples < 1 {
-		return config, fmt.Errorf("Invalid iterations value: %d", config.Samples)
+		return config, fmt.Errorf("Invalid samples value: %d", config.Samples)
 	}
 	/*
 		if config.BatchSend < 1 {

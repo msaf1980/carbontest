@@ -4,6 +4,7 @@ import (
 	"carbontest/pkg/base"
 	"fmt"
 	"math/rand"
+	"strconv"
 )
 
 func RandomDuration(min int64, max int64) int64 {
@@ -21,8 +22,8 @@ type MetricIterator interface {
 
 type record struct {
 	metricPrefix string
-	iteration    uint
-	samples      uint
+	iteration    int
+	samples      int
 	event        base.Event
 }
 
@@ -42,15 +43,18 @@ func (m *MetricGenIterator) Next(worker int, timestamp int64) base.Event {
 		return base.Event{base.CLOSE, 0, ""}
 	} else {
 		m.data[worker].iteration++
+		//s := fmt.Sprintf("%s.iter%d %d %d\n", m.data[worker].metricPrefix, m.data[worker].iteration, m.data[worker].iteration, timestamp)
+		it := strconv.Itoa(m.data[worker].iteration)
+		s := m.data[worker].metricPrefix + ".iter" + it + " " + it + " " + strconv.FormatInt(timestamp, 10) + "\n"
 		return base.Event{
 			base.SEND,
 			RandomDuration(m.min, m.max),
-			fmt.Sprintf("%s.iter%d %d %d\n", m.data[worker].metricPrefix, m.data[worker].iteration, m.data[worker].iteration, timestamp),
+			s,
 		}
 	}
 }
 
-func New(metricPrefix string, workers int, samples uint, min int64, max int64) *MetricGenIterator {
+func New(metricPrefix string, workers int, samples int, min int64, max int64) *MetricGenIterator {
 	data := make([]record, workers)
 	for id := range data {
 		data[id].metricPrefix = fmt.Sprintf("%s.worker%d", metricPrefix, id)
