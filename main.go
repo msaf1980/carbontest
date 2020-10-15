@@ -98,7 +98,7 @@ func printStat() {
 	for proto, opers := range totalStat {
 		for oper, errors := range opers {
 			for error, s := range errors {
-				v := fmt.Sprintf("%s.%s.%s %d (%.2f/s)\n", proto.String, oper.String(), error.String(),
+				v := fmt.Sprintf("%s.%s.%s %d (%.2f/s)\n", proto.String(), oper.String(), error.String(),
 					s, float64(s)/duration)
 				statVal = append(statVal, v)
 			}
