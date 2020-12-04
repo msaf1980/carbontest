@@ -4,6 +4,8 @@ import (
 	"carbontest/pkg/base"
 	"fmt"
 	"strconv"
+
+	stringutils "github.com/msaf1980/go-stringutils"
 )
 
 type record struct {
@@ -13,6 +15,7 @@ type record struct {
 	iteration    int // metrics in connection iteration
 	samples      int
 	event        base.Event
+	sb           stringutils.Builder // metric buffer
 }
 
 type MetricGenIterator struct {
@@ -41,13 +44,21 @@ func (m *MetricGenIterator) Next(worker int, timestamp int64) base.Event {
 		} else {
 			m.data[worker].biter++
 		}
-		//s := fmt.Sprintf("%s.iter%d %d %d\n", m.data[worker].metricPrefix, m.data[worker].iteration, m.data[worker].iteration, timestamp)
 		it := strconv.Itoa(m.data[worker].iteration)
-		s := m.data[worker].metricPrefix + ".iter" + it + " " + it + " " + strconv.FormatInt(timestamp, 10) + "\n"
+		m.data[worker].sb.Reset()
+		m.data[worker].sb.WriteString(m.data[worker].metricPrefix)
+		m.data[worker].sb.WriteString(".iter")
+		m.data[worker].sb.WriteString(it)
+		m.data[worker].sb.WriteString(" ")
+		m.data[worker].sb.WriteString(it)
+		m.data[worker].sb.WriteString(" ")
+		m.data[worker].sb.WriteString(strconv.FormatInt(timestamp, 10))
+		m.data[worker].sb.WriteString("\n")
+		//s := m.data[worker].metricPrefix + ".iter" + it + " " + it + " " + strconv.FormatInt(timestamp, 10) + "\n"
 		return base.Event{
 			action,
 			delay,
-			s,
+			m.data[worker].sb.String(),
 		}
 	}
 }
@@ -65,6 +76,7 @@ func New(metricPrefix string, workers int, batch int, samples int, min int64, ma
 		data[id].samples = samples
 		data[id].batch = batch
 		data[id].biter = 1
+		data[id].sb.Grow(100)
 	}
 	m := &MetricGenIterator{data: data, minDealy: min, maxDelay: max}
 

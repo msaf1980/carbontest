@@ -5,6 +5,8 @@ github.com/google/gopacket v1.1.18/go.mod h1:UdDNZ1OO62aGYVnPhxT1U6aI7ukYtA/kB8v
 github.com/msaf1980/carbontest v0.0.0-20201009115443-ad051551a6bb h1:ecpDHdrPs6bjkVa/CnUUmaGwp1JRON2MUlJ2zp6/4I8=
 github.com/msaf1980/cyclicbarrier v1.0.0 h1:2hveLV0l4KLRaAArCN2DDVjVo22VwJWhnDiBduie4Rw=
 github.com/msaf1980/cyclicbarrier v1.0.0/go.mod h1:NuMDIp9leCwvc//TJiF0MQKEMC9xyEvvE4r5OZ+aEws=
+github.com/msaf1980/go-stringutils v0.0.2 h1:2pXvzooabqLsbv6/p9FmwheSCwoQMMavNUNyCaJNNIQ=
+github.com/msaf1980/go-stringutils v0.0.2/go.mod h1:xdcCDstqpaouqTp4peJKtTkkJ8njk+elboef/I65jC4=
 github.com/pmezard/go-difflib v1.0.0/go.mod h1:iKH77koFhYxTK1pcRnkKkqfTogsbg7gZNVY4sRDYZ/4=
 github.com/stretchr/objx v0.1.0/go.mod h1:HFkY916IF+rwdDfMAkV7OtwuqBVzrE8GR6GFx+wExME=
 github.com/stretchr/testify v1.3.0/go.mod h1:M5WIy9Dh21IEIfnGCwXGc5bZfKNJtfHm1UVUgZn+9EI=
