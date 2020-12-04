@@ -7,10 +7,12 @@ import (
 	"time"
 
 	"carbontest/pkg/base"
-	"carbontest/pkg/metricgen"
 )
 
-func delay(config *config, delay int64) time.Time {
+func delay(config *config, delay int64, action base.NetOper) time.Time {
+	if action == base.SEND {
+		return time.Now()
+	}
 	if config.RateLimiter != nil {
 		return config.RateLimiter.Take()
 	} else {
@@ -22,7 +24,7 @@ func delay(config *config, delay int64) time.Time {
 	}
 }
 
-func TcpWorker(id int, c config, out chan<- ConStat, mdetail chan<- string, iter metricgen.MetricIterator) {
+func TcpWorker(id int, c config, out chan<- ConStat, mdetail chan<- string, iter base.MetricIterator) {
 	r := ConStatNew(id, base.TCP)
 
 	defer func(ch chan<- ConStat) {
@@ -46,11 +48,12 @@ func TcpWorker(id int, c config, out chan<- ConStat, mdetail chan<- string, iter
 		e := iter.Next(id, start.Unix())
 		if e.Action == base.CLOSE {
 			if con != nil {
+				err = flushWriter(w, c.Compress)
 				con.Close()
 				con = nil
 				w = nil
 			}
-		} else if con == nil && e.Action == base.SEND {
+		} else if con == nil && (e.Action == base.SEND || e.Action == base.FLUSH) {
 			con, w, err = connectWriter("tcp", c.Addr, c.ConTimeout, c.Compress)
 			r.Elapsed = time.Since(start).Nanoseconds()
 			r.Type = base.CONNECT
@@ -59,20 +62,21 @@ func TcpWorker(id int, c config, out chan<- ConStat, mdetail chan<- string, iter
 			r.Size = 0
 			out <- *r
 		}
-		if err == nil && e.Action == base.SEND {
+		if err == nil && (e.Action == base.SEND || e.Action == base.FLUSH) {
 			start = time.Now()
 			err = con.SetDeadline(start.Add(c.SendTimeout))
 			if err == nil {
 				//r.Size, err = fmt.Fprint(w, e.Send)
 				r.Size, err = w.Write([]byte(e.Send))
+				if err == nil && e.Action == base.FLUSH {
+					err = flushWriter(w, c.Compress)
+				}
 				if err == nil {
-					if err = flushWriter(w, c.Compress); err == nil {
-						count++
-					}
+					count++
 				}
 			}
 		}
-		end := delay(&c, e.Delay)
+		end := delay(&c, e.Delay, e.Action)
 		r.Elapsed = end.Sub(start).Nanoseconds()
 		r.Type = base.SEND
 		r.Error = base.NetError(err)
@@ -98,7 +102,7 @@ func TcpWorker(id int, c config, out chan<- ConStat, mdetail chan<- string, iter
 	}
 }
 
-func UDPWorker(id int, c config, out chan<- ConStat, mdetail chan<- string, iter metricgen.MetricIterator) {
+func UDPWorker(id int, c config, out chan<- ConStat, mdetail chan<- string, iter base.MetricIterator) {
 	r := ConStatNew(id, base.UDP)
 	r.Type = base.SEND
 
@@ -121,11 +125,12 @@ func UDPWorker(id int, c config, out chan<- ConStat, mdetail chan<- string, iter
 		e := iter.Next(id, start.Unix())
 		if e.Action == base.CLOSE {
 			if con != nil {
+				err = flushWriter(w, c.Compress)
 				con.Close()
 				w = nil
 				con = nil
 			}
-		} else if con == nil && e.Action == base.SEND {
+		} else if con == nil && (e.Action == base.SEND || e.Action == base.FLUSH) {
 			start = time.Now()
 			con, w, err = connectWriter("udp", c.Addr, c.ConTimeout, c.Compress)
 			r.Elapsed = time.Since(start).Nanoseconds()
@@ -136,11 +141,13 @@ func UDPWorker(id int, c config, out chan<- ConStat, mdetail chan<- string, iter
 			out <- *r
 		}
 
-		if err == nil && e.Action == base.SEND {
+		if err == nil && (e.Action == base.SEND || e.Action == base.FLUSH) {
 			start = time.Now()
 			//sended, err := fmt.Fprint(w, e.Send)
 			sended, err := w.Write([]byte(e.Send))
-			flushWriter(w, c.Compress)
+			if err == nil && e.Action == base.FLUSH {
+				err = flushWriter(w, c.Compress)
+			}
 			r.Error = base.NetError(err)
 			r.Size = sended
 			if err == nil {
@@ -157,7 +164,7 @@ func UDPWorker(id int, c config, out chan<- ConStat, mdetail chan<- string, iter
 			r.Error = base.NetError(err)
 			r.Size = 0
 		}
-		end := delay(&c, e.Delay)
+		end := delay(&c, e.Delay, e.Action)
 		r.Elapsed = end.Sub(start).Nanoseconds()
 		r.TimeStamp = start.UnixNano()
 		out <- *r

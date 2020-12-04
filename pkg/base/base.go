@@ -2,6 +2,7 @@ package base
 
 import (
 	"io"
+	"math/rand"
 	"net"
 	"strings"
 )
@@ -36,6 +37,7 @@ const (
 	INIT NetOper = iota
 	CONNECT
 	SEND
+	FLUSH
 	CLOSE
 )
 
@@ -43,6 +45,7 @@ var NetOperStrings = [...]string{
 	"INIT",
 	"CONNECT",
 	"SEND",
+	"FLUSH", // Send and flush
 	"CLOSE",
 }
 
@@ -110,4 +113,17 @@ type Event struct {
 	Action NetOper
 	Delay  int64
 	Send   string
+}
+
+func RandomDuration(min, max int64) int64 {
+	if max > min {
+		return rand.Int63n(max-min) + min
+	} else {
+		return min
+	}
+}
+
+type MetricIterator interface {
+	Reset(worker int)                       // Reset iteration
+	Next(worker int, timestamp int64) Event // Get next event (CONNECT, SEND, FLUSH, CLOSE)
 }

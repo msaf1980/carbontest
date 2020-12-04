@@ -41,7 +41,7 @@ type config struct {
 	//Connections int
 	Workers   int // TCP Workers
 	Duration  time.Duration
-	Samples   int
+	Metrics   int
 	BatchSend int
 
 	Compress base.CompressType
@@ -219,10 +219,10 @@ func parseArgs() (config, error) {
 	flag.IntVar(&port, "port", 2003, "port")
 	flag.IntVar(&config.Workers, "workers", 10, "TCP workers")
 	flag.StringVar(&duration, "duration", "60s", "total test duration")
-	flag.IntVar(&config.Samples, "samples", 1, "samples for metrics iterator (may be also used as send count in one TCP connection)")
-	//flag.IntVar(&config.BatchSend, "batch", 1, "send metric count in one TCP send")
+	flag.IntVar(&config.Metrics, "metrics", 1, "metrics sended in one TCP connection")
+	flag.IntVar(&config.BatchSend, "batch", 1, "metrics count in one TCP send")
 	flag.IntVar(&config.UWorkers, "uworkers", 0, "UDP workers (default 0)")
-	//flag.IntVar(&config.UBatchSend, "ubatch", 1, "send metric count in one UDP send")
+	flag.IntVar(&config.UBatchSend, "ubatch", 1, "metrics count in one UDP send")
 	flag.StringVar(&config.MetricPrefix, "prefix", "test", "metric prefix")
 
 	flag.StringVar(&conTimeout, "c", "100ms", "TCP connect timeout (ms)")
@@ -251,14 +251,12 @@ func parseArgs() (config, error) {
 	if config.Workers < 0 {
 		return config, fmt.Errorf("Invalid TCP workers value: %d", config.Workers)
 	}
-	if config.Samples < 1 {
-		return config, fmt.Errorf("Invalid samples value: %d", config.Samples)
+	if config.Metrics < 1 {
+		return config, fmt.Errorf("Invalid metrics value: %d", config.Metrics)
 	}
-	/*
-		if config.BatchSend < 1 {
-			return config, errors.New(fmt.Sprintf("Invalid TCP metric batchsend value: %d\n", config.BatchSend))
-		}
-	*/
+	if config.BatchSend < 1 {
+		return config, fmt.Errorf("Invalid TCP metric batchsend value: %d\n", config.BatchSend)
+	}
 	if config.UWorkers < 0 {
 		return config, fmt.Errorf("Invalid UDP workers value: %d", config.Workers)
 	}
@@ -416,14 +414,14 @@ func main() {
 	cb = cyclicbarrier.New(config.Workers + config.UWorkers + 1)
 
 	if config.Workers > 0 {
-		titer := metricgen.New(config.MetricPrefix+".tcp", config.Workers, config.Samples,
+		titer := metricgen.New(config.MetricPrefix+".tcp", config.Workers, config.BatchSend, config.Metrics,
 			config.SendDelayMin.Nanoseconds(), config.SendDelayMax.Nanoseconds())
 		for i := 0; i < config.Workers; i++ {
 			go TcpWorker(i, config, result, mdetail, titer)
 		}
 	}
 	if config.UWorkers > 0 {
-		uiter := metricgen.New(config.MetricPrefix+".udp", config.UWorkers, config.Samples,
+		uiter := metricgen.New(config.MetricPrefix+".udp", config.UWorkers, config.BatchSend, config.Metrics,
 			config.SendDelayMin.Nanoseconds(), config.SendDelayMax.Nanoseconds())
 		for i := 0; i < config.UWorkers; i++ {
 			go UDPWorker(i, config, result, mdetail, uiter)
