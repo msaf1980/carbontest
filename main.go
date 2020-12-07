@@ -19,6 +19,7 @@ import (
 
 	"carbontest/pkg/base"
 	"carbontest/pkg/metricgen"
+	"carbontest/pkg/metriclist"
 )
 
 var cb *cyclicbarrier.CyclicBarrier
@@ -43,6 +44,11 @@ type config struct {
 	Duration  time.Duration
 	Metrics   int
 	BatchSend int
+
+	MetricFile string
+	Min        int32
+	Max        int32
+	Incr       int32
 
 	Compress base.CompressType
 
@@ -213,6 +219,9 @@ func parseArgs() (config, error) {
 		err          error
 		compressType string
 		rateLimit    int
+		min          string
+		max          string
+		inc          string
 	)
 
 	flag.StringVar(&host, "host", "127.0.0.1", "hostname")
@@ -224,6 +233,11 @@ func parseArgs() (config, error) {
 	flag.IntVar(&config.UWorkers, "uworkers", 0, "UDP workers (default 0)")
 	flag.IntVar(&config.UBatchSend, "ubatch", 1, "metrics count in one UDP send")
 	flag.StringVar(&config.MetricPrefix, "prefix", "test", "metric prefix")
+
+	flag.StringVar(&config.MetricFile, "file", "", "metrics file (format: Name [min[:max[:increment]]")
+	flag.StringVar(&min, "min", "0", "default min value for metrics file")
+	flag.StringVar(&max, "max", "0", "default max value for metrics file")
+	flag.StringVar(&inc, "incr", "0", "default incr value for metrics file (if 0 - value is random, also increase until max, than descrease to min)")
 
 	flag.StringVar(&conTimeout, "c", "100ms", "TCP connect timeout (ms)")
 	flag.StringVar(&sendTimeout, "s", "500ms", "TCP send timeout (ms)")
@@ -242,6 +256,26 @@ func parseArgs() (config, error) {
 	flag.StringVar(&compressType, "compress", "", "compress [ gzip | lz4 ]")
 
 	flag.Parse()
+
+	config.Min, err = base.ParseInt32(min, 10)
+	if err != nil {
+		return config, err
+	}
+	config.Max, err = base.ParseInt32(max, 10)
+	if err != nil {
+		return config, err
+	}
+	if config.Max < config.Min {
+		config.Min, config.Max = config.Max, config.Min
+	}
+	config.Incr, err = base.ParseInt32(inc, 10)
+	if err != nil {
+		return config, err
+	}
+	if config.Incr < 0 {
+		config.Incr = -config.Incr
+	}
+
 	if host == "" {
 		host = "127.0.0.1"
 	}
@@ -406,26 +440,57 @@ func main() {
 		defer pprof.StopCPUProfile()
 	}
 
+	cb = cyclicbarrier.New(config.Workers + config.UWorkers + 1)
+
 	result := make(chan ConStat, (config.Workers+config.UWorkers)*1000)
 	mdetail := make(chan string, (config.Workers+config.UWorkers)*10000)
 	workers := config.Workers
 	uworkers := config.UWorkers
+	var titer base.MetricIterator
+	var uiter base.MetricIterator
 
-	cb = cyclicbarrier.New(config.Workers + config.UWorkers + 1)
-
-	if config.Workers > 0 {
-		titer := metricgen.New(config.MetricPrefix+".tcp", config.Workers, config.BatchSend, config.Metrics,
+	if len(config.MetricFile) > 0 {
+		metrics, err := metriclist.LoadMetricFile(config.MetricFile, config.Min, config.Max, config.Incr)
+		if err != nil {
+			fmt.Fprintf(os.Stderr, "%s\n", err.Error())
+			os.Exit(2)
+		}
+		iter, err := metriclist.New(metrics, config.Workers, config.BatchSend, config.Metrics,
 			config.SendDelayMin.Nanoseconds(), config.SendDelayMax.Nanoseconds())
-		for i := 0; i < config.Workers; i++ {
-			go TcpWorker(i, config, result, mdetail, titer)
+		if err != nil {
+			fmt.Fprintf(os.Stderr, "%s\n", err.Error())
+			os.Exit(2)
+		}
+		if config.Workers > 0 {
+			titer = iter
+		}
+		if config.UWorkers > 0 {
+			uiter = iter
+		}
+	} else {
+		if config.Workers > 0 {
+			titer, err = metricgen.New(config.MetricPrefix+".tcp", config.Workers, config.BatchSend, config.Metrics,
+				config.SendDelayMin.Nanoseconds(), config.SendDelayMax.Nanoseconds())
+			if err != nil {
+				fmt.Fprintf(os.Stderr, "%s\n", err.Error())
+				os.Exit(2)
+			}
+		}
+		if config.UWorkers > 0 {
+			uiter, err = metricgen.New(config.MetricPrefix+".udp", config.UWorkers, config.BatchSend, config.Metrics,
+				config.SendDelayMin.Nanoseconds(), config.SendDelayMax.Nanoseconds())
+			if err != nil {
+				fmt.Fprintf(os.Stderr, "%s\n", err.Error())
+				os.Exit(2)
+			}
 		}
 	}
-	if config.UWorkers > 0 {
-		uiter := metricgen.New(config.MetricPrefix+".udp", config.UWorkers, config.BatchSend, config.Metrics,
-			config.SendDelayMin.Nanoseconds(), config.SendDelayMax.Nanoseconds())
-		for i := 0; i < config.UWorkers; i++ {
-			go UDPWorker(i, config, result, mdetail, uiter)
-		}
+
+	for i := 0; i < config.Workers; i++ {
+		go TcpWorker(i, config, result, mdetail, titer)
+	}
+	for i := 0; i < config.UWorkers; i++ {
+		go UDPWorker(i, config, result, mdetail, uiter)
 	}
 
 	// Test duration

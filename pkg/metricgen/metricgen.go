@@ -11,16 +11,16 @@ import (
 type record struct {
 	metricPrefix string
 	biter        int // batch iteration
-	batch        int
+	batch        int // metrics sended before buffer flushed
 	iteration    int // metrics in connection iteration
-	samples      int
-	event        base.Event
-	sb           stringutils.Builder // metric buffer
+	samples      int // metrics, sended in one connection (if reached, connection closed)	event
+	base.Event
+	sb stringutils.Builder // metric buffer
 }
 
 type MetricGenIterator struct {
 	data     []record // workers state
-	minDealy int64
+	minDelay int64
 	maxDelay int64
 }
 
@@ -40,10 +40,11 @@ func (m *MetricGenIterator) Next(worker int, timestamp int64) base.Event {
 		if m.data[worker].biter >= m.data[worker].batch {
 			m.data[worker].biter = 1
 			action = base.FLUSH
-			delay = base.RandomDuration(m.minDealy, m.maxDelay)
+			delay = base.RandomDuration(m.minDelay, m.maxDelay)
 		} else {
 			m.data[worker].biter++
 		}
+
 		it := strconv.Itoa(m.data[worker].iteration)
 		m.data[worker].sb.Reset()
 		m.data[worker].sb.WriteString(m.data[worker].metricPrefix)
@@ -54,7 +55,7 @@ func (m *MetricGenIterator) Next(worker int, timestamp int64) base.Event {
 		m.data[worker].sb.WriteString(" ")
 		m.data[worker].sb.WriteString(strconv.FormatInt(timestamp, 10))
 		m.data[worker].sb.WriteString("\n")
-		//s := m.data[worker].metricPrefix + ".iter" + it + " " + it + " " + strconv.FormatInt(timestamp, 10) + "\n"
+
 		return base.Event{
 			action,
 			delay,
@@ -63,7 +64,7 @@ func (m *MetricGenIterator) Next(worker int, timestamp int64) base.Event {
 	}
 }
 
-func New(metricPrefix string, workers int, batch int, samples int, min int64, max int64) *MetricGenIterator {
+func New(metricPrefix string, workers int, batch int, samples int, minDelay int64, maxDelay int64) (*MetricGenIterator, error) {
 	data := make([]record, workers)
 	if batch < 0 {
 		batch = 1
@@ -78,7 +79,7 @@ func New(metricPrefix string, workers int, batch int, samples int, min int64, ma
 		data[id].biter = 1
 		data[id].sb.Grow(100)
 	}
-	m := &MetricGenIterator{data: data, minDealy: min, maxDelay: max}
+	m := &MetricGenIterator{data: data, minDelay: minDelay, maxDelay: maxDelay}
 
-	return m
+	return m, nil
 }

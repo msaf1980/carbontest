@@ -4,6 +4,7 @@ import (
 	"io"
 	"math/rand"
 	"net"
+	"strconv"
 	"strings"
 )
 
@@ -113,6 +114,19 @@ type Event struct {
 	Action NetOper
 	Delay  int64
 	Send   string
+}
+
+func ParseInt32(s string, base int) (int32, error) {
+	n, err := strconv.ParseInt(s, base, 32)
+	return int32(n), err
+}
+
+func RandomValue(min, max int32) int32 {
+	if max > min {
+		return rand.Int31n(max-min) + min
+	} else {
+		return min
+	}
 }
 
 func RandomDuration(min, max int64) int64 {
