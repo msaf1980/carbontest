@@ -4,6 +4,7 @@ github.com/google/gopacket v1.1.18 h1:lum7VRA9kdlvBi7/v2p7/zcbkduHaCH/SVVyurs7Op
 github.com/google/gopacket v1.1.18/go.mod h1:UdDNZ1OO62aGYVnPhxT1U6aI7ukYtA/kB8vaU0diBUM=
 github.com/msaf1980/carbontest v0.0.0-20201009115443-ad051551a6bb h1:ecpDHdrPs6bjkVa/CnUUmaGwp1JRON2MUlJ2zp6/4I8=
 github.com/msaf1980/carbontest v0.0.0-20201015194527-f4f970a8b325 h1:3x672S4cP2yH5F0mIEKshq1L/5g409DXVufU1C5c8Pw=
+github.com/msaf1980/carbontest v0.0.0-20201207170917-d6093bfd2c81 h1:sNbuCBKzuxDXxGD4lm7R9qS5xxJ+vtA8eJYJSbGlG90=
 github.com/msaf1980/cyclicbarrier v1.0.0 h1:2hveLV0l4KLRaAArCN2DDVjVo22VwJWhnDiBduie4Rw=
 github.com/msaf1980/cyclicbarrier v1.0.0/go.mod h1:NuMDIp9leCwvc//TJiF0MQKEMC9xyEvvE4r5OZ+aEws=
 github.com/msaf1980/go-stringutils v0.0.2 h1:2pXvzooabqLsbv6/p9FmwheSCwoQMMavNUNyCaJNNIQ=

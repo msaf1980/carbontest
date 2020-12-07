@@ -7,6 +7,7 @@ import (
 	"io"
 	"os"
 	"strconv"
+	"strings"
 	"sync/atomic"
 
 	stringutils "github.com/msaf1980/go-stringutils"
@@ -98,6 +99,8 @@ func (m *MetricListIterator) Next(worker int, timestamp int64) base.Event {
 			m.data[worker].sb.WriteString(strconv.FormatInt(timestamp, 10))
 			m.data[worker].sb.WriteString("\n")
 
+			fmt.Print(m.data[worker].sb.String())
+
 			return base.Event{
 				action,
 				delay,
@@ -149,12 +152,12 @@ func LoadMetricFile(filename string, valueMin, valueMax, valueInc int32) ([]metr
 	buf := make([]string, 4)
 	for {
 		n++
-		line, _, err := reader.ReadLine()
+		line, err := reader.ReadString('\n')
 		if err != nil {
 			break
 		}
 		//fmt.Printf("%s \n", line)
-		v, n := stringutils.SplitN(stringutils.UnsafeString(line), " ", buf)
+		v, n := stringutils.SplitN(strings.TrimRight(line, "\n"), " ", buf)
 		m := metric{name: v[0]}
 		if len(v) > 2 {
 			return metrics, fmt.Errorf("%d line incorrect", n)
