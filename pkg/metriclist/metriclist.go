@@ -99,7 +99,7 @@ func (m *MetricListIterator) Next(worker int, timestamp int64) base.Event {
 			m.data[worker].sb.WriteString(strconv.FormatInt(timestamp, 10))
 			m.data[worker].sb.WriteString("\n")
 
-			fmt.Print(m.data[worker].sb.String())
+			//fmt.Print(m.data[worker].sb.String())
 
 			return base.Event{
 				action,
