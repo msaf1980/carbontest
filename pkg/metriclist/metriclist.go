@@ -136,7 +136,7 @@ func New(metrics []metric, workers int, batch int, samples int,
 	return m, nil
 }
 
-func LoadMetricFile(filename string, valueMin, valueMax, valueInc int32) ([]metric, error) {
+func LoadMetricFile(filename string, valueMin, valueMax, valueInc int32, metricPing string) ([]metric, error) {
 	file, err := os.Open(filename)
 	if err != nil {
 		return nil, err
@@ -196,6 +196,10 @@ func LoadMetricFile(filename string, valueMin, valueMax, valueInc int32) ([]metr
 	}
 	if err == io.EOF {
 		err = nil
+	}
+
+	if len(metricPing) > 0 {
+		metrics = append(metrics, metric{name: metricPing, min: 1, max: 1})
 	}
 
 	return metrics, err

@@ -80,29 +80,6 @@ type config struct {
 
 const header = "timestamp\tConId\tProto\tType\tStatus\tElapsed\tSize\n"
 
-// func mergeStat(dest map[base.Proto]map[base.NetOper]map[base.NetErr]int64, source map[base.Proto]map[base.NetOper]map[base.NetErr]int64) {
-// 	for k1, v1 := range source {
-// 		_, ok := dest[k1]
-// 		if !ok {
-// 			dest[k1] = map[base.NetOper]map[base.NetErr]int64{}
-// 		}
-// 		for k2, v2 := range v1 {
-// 			_, ok := dest[k1][k2]
-// 			if !ok {
-// 				dest[k1][k2] = map[base.NetErr]int64{}
-// 			}
-// 			for k3, v3 := range v2 {
-// 				_, ok := dest[k1][k2]
-// 				if ok {
-// 					dest[k1][k2][k3] += v3
-// 				} else {
-// 					dest[k1][k2][k3] = v3
-// 				}
-// 			}
-// 		}
-// 	}
-// }
-
 func printStat(start, end time.Time) {
 	// Print stat
 	var statVal []string
@@ -155,125 +132,36 @@ func sendAggrStat(graphite *GraphiteQueue, start, end time.Time, tcpStat, udpSta
 	timeStamp := start.Unix()
 	duration := end.Sub(start).Seconds()
 	if workers > 0 {
-		graphite.Put("carbontest.tcp.size_ps", strconv.FormatFloat(float64(tcpStat.size)/duration, 'g', 6, 64), timeStamp)
+		graphite.Put("tcp.size_ps", strconv.FormatFloat(float64(tcpStat.size)/duration, 'g', 6, 64), timeStamp)
 
-		graphite.Put("carbontest.tcp.conns_ps", strconv.FormatFloat(float64(tcpStat.conns)/duration, 'g', 6, 64), timeStamp)
-		graphite.Put("carbontest.tcp.conns_err_ps", strconv.FormatFloat(float64(tcpStat.connsErr)/duration, 'g', 6, 64), timeStamp)
-		graphite.Put("carbontest.tcp.conns_tout_ps", strconv.FormatFloat(float64(tcpStat.connsTout)/duration, 'g', 6, 64), timeStamp)
-		graphite.Put("carbontest.tcp.conns_reset_ps", strconv.FormatFloat(float64(tcpStat.connsReset)/duration, 'g', 6, 64), timeStamp)
-		graphite.Put("carbontest.tcp.conns_refused_ps", strconv.FormatFloat(float64(tcpStat.connsRefused)/duration, 'g', 6, 64), timeStamp)
+		graphite.Put("tcp.conns_ps", strconv.FormatFloat(float64(tcpStat.conns)/duration, 'g', 6, 64), timeStamp)
+		graphite.Put("tcp.conns_err_ps", strconv.FormatFloat(float64(tcpStat.connsErr)/duration, 'g', 6, 64), timeStamp)
+		graphite.Put("tcp.conns_tout_ps", strconv.FormatFloat(float64(tcpStat.connsTout)/duration, 'g', 6, 64), timeStamp)
+		graphite.Put("tcp.conns_reset_ps", strconv.FormatFloat(float64(tcpStat.connsReset)/duration, 'g', 6, 64), timeStamp)
+		graphite.Put("tcp.conns_refused_ps", strconv.FormatFloat(float64(tcpStat.connsRefused)/duration, 'g', 6, 64), timeStamp)
 
-		graphite.Put("carbontest.tcp.sends_ps", strconv.FormatFloat(float64(tcpStat.sends)/duration, 'g', 6, 64), timeStamp)
-		graphite.Put("carbontest.tcp.sends_err_ps", strconv.FormatFloat(float64(tcpStat.sendsErr)/duration, 'g', 6, 64), timeStamp)
-		graphite.Put("carbontest.tcp.sends_tout_ps", strconv.FormatFloat(float64(tcpStat.sendsTout)/duration, 'g', 6, 64), timeStamp)
-		graphite.Put("carbontest.tcp.sends_reset_ps", strconv.FormatFloat(float64(tcpStat.sendsReset)/duration, 'g', 6, 64), timeStamp)
-		graphite.Put("carbontest.tcp.sends_eof_ps", strconv.FormatFloat(float64(tcpStat.sendsEOF)/duration, 'g', 6, 64), timeStamp)
+		graphite.Put("tcp.sends_ps", strconv.FormatFloat(float64(tcpStat.sends)/duration, 'g', 6, 64), timeStamp)
+		graphite.Put("tcp.sends_err_ps", strconv.FormatFloat(float64(tcpStat.sendsErr)/duration, 'g', 6, 64), timeStamp)
+		graphite.Put("tcp.sends_tout_ps", strconv.FormatFloat(float64(tcpStat.sendsTout)/duration, 'g', 6, 64), timeStamp)
+		graphite.Put("tcp.sends_reset_ps", strconv.FormatFloat(float64(tcpStat.sendsReset)/duration, 'g', 6, 64), timeStamp)
+		graphite.Put("tcp.sends_eof_ps", strconv.FormatFloat(float64(tcpStat.sendsEOF)/duration, 'g', 6, 64), timeStamp)
 
-		graphite.Put("carbontest.tcp.resolve_err_ps", strconv.FormatFloat(float64(tcpStat.connsResolve)/duration, 'g', 6, 64), timeStamp)
-		graphite.Put("carbontest.tcp.limits_err_ps", strconv.FormatFloat(float64(tcpStat.connsFileLimit)/duration, 'g', 6, 64), timeStamp)
+		graphite.Put("tcp.resolve_err_ps", strconv.FormatFloat(float64(tcpStat.connsResolve)/duration, 'g', 6, 64), timeStamp)
+		graphite.Put("tcp.limits_err_ps", strconv.FormatFloat(float64(tcpStat.connsFileLimit)/duration, 'g', 6, 64), timeStamp)
 	}
 	if uworkers > 0 {
-		graphite.Put("carbontest.udp.size_ps", strconv.FormatFloat(float64(udpStat.size)/duration, 'g', 6, 64), timeStamp)
+		graphite.Put("udp.size_ps", strconv.FormatFloat(float64(udpStat.size)/duration, 'g', 6, 64), timeStamp)
 
-		graphite.Put("carbontest.udp.sends_ps", strconv.FormatFloat(float64(udpStat.sends)/duration, 'g', 6, 64), timeStamp)
-		graphite.Put("carbontest.udp.sends_err_ps", strconv.FormatFloat(float64(udpStat.sendsErr)/duration, 'g', 6, 64), timeStamp)
-		graphite.Put("carbontest.udp.sends_tout_ps", strconv.FormatFloat(float64(udpStat.sendsTout)/duration, 'g', 6, 64), timeStamp)
-		graphite.Put("carbontest.udp.sends_reset_ps", strconv.FormatFloat(float64(udpStat.sendsReset)/duration, 'g', 6, 64), timeStamp)
-		graphite.Put("carbontest.udp.sends_eof_ps", strconv.FormatFloat(float64(udpStat.sendsEOF)/duration, 'g', 6, 64), timeStamp)
+		graphite.Put("udp.sends_ps", strconv.FormatFloat(float64(udpStat.sends)/duration, 'g', 6, 64), timeStamp)
+		graphite.Put("udp.sends_err_ps", strconv.FormatFloat(float64(udpStat.sendsErr)/duration, 'g', 6, 64), timeStamp)
+		graphite.Put("udp.sends_tout_ps", strconv.FormatFloat(float64(udpStat.sendsTout)/duration, 'g', 6, 64), timeStamp)
+		graphite.Put("udp.sends_reset_ps", strconv.FormatFloat(float64(udpStat.sendsReset)/duration, 'g', 6, 64), timeStamp)
+		graphite.Put("udp.sends_eof_ps", strconv.FormatFloat(float64(udpStat.sendsEOF)/duration, 'g', 6, 64), timeStamp)
 
-		graphite.Put("carbontest.udp.resolve_err_ps", strconv.FormatFloat(float64(udpStat.connsResolve)/duration, 'g', 6, 64), timeStamp)
-		graphite.Put("carbontest.udp.limits_err_ps", strconv.FormatFloat(float64(udpStat.connsFileLimit)/duration, 'g', 6, 64), timeStamp)
+		graphite.Put("udp.resolve_err_ps", strconv.FormatFloat(float64(udpStat.connsResolve)/duration, 'g', 6, 64), timeStamp)
+		graphite.Put("udp.limits_err_ps", strconv.FormatFloat(float64(udpStat.connsFileLimit)/duration, 'g', 6, 64), timeStamp)
 	}
 }
-
-// func printAggrStat(w *bufio.Writer, timeStamp int64, duration float64, workers int, uworkers int) {
-// 	//timeStr := time.Unix(timeStamp/1000000000, 0).Format("2006-01-02T15:04:05-0700")
-// 	timeStr := time.Unix(timeStamp/1000000000, 0).Format(time.RFC3339)
-// 	if workers > 0 {
-// 		sProto, ok := stat[base.TCP]
-// 		if !ok {
-// 			fmt.Fprintf(w, "%s\t%s\t%.4f\t%.4f\t%.4f\t%.4f\t%.4f\t%.4f\t%.4f\t%.4f\t%.4f\t\n",
-// 				timeStr, "TCP", 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0)
-
-// 		} else {
-// 			var sConnOk int64
-// 			var sConnErr int64
-// 			var sConnTOut int64
-// 			var sConnReset int64
-// 			var sConnRefused int64
-// 			for k, v := range sProto[base.CONNECT] {
-// 				if k == base.OK {
-// 					sConnOk = v
-// 				} else {
-// 					sConnErr += v
-// 					switch k {
-// 					case base.TIMEOUT:
-// 						sConnTOut = v
-// 					case base.RESET:
-// 						sConnReset = v
-// 					case base.REFUSED:
-// 						sConnRefused = v
-// 					}
-// 				}
-// 			}
-
-// 			var sSendOk int64
-// 			var sSendErr int64
-// 			var sSendTOut int64
-// 			var sSendReset int64
-// 			for k, v := range sProto[base.SEND] {
-// 				if k == base.OK {
-// 					sSendOk = v
-// 				} else {
-// 					sSendErr += v
-// 					switch k {
-// 					case base.TIMEOUT:
-// 						sSendTOut = v
-// 					case base.RESET:
-// 						sSendReset = v
-// 					}
-// 				}
-// 			}
-// 			fmt.Fprintf(w, "%s\t%s\t%.4f\t%.4f\t%.4f\t%.4f\t%.4f\t%.4f\t%.4f\t%.4f\t%.4f\n",
-// 				timeStr, "TCP",
-// 				float64(sConnOk)/duration, float64(sConnErr)/duration,
-// 				float64(sSendOk)/duration, float64(sSendErr)/duration,
-// 				float64(sConnTOut)/duration, float64(sConnReset)/duration, float64(sConnRefused)/duration,
-// 				float64(sSendTOut)/duration, float64(sSendReset)/duration)
-// 		}
-// 	}
-// 	if uworkers > 0 {
-// 		sProto, ok := stat[base.UDP]
-// 		if !ok {
-// 			fmt.Fprintf(w, "%s\t%s\t-\t-\t%.4f\t%.4f\t-\t-\t-\t%.4f\t%.4f\n",
-// 				timeStr, "UDP", 0.0, 0.0, 0.0, 0.0)
-
-// 		} else {
-// 			var sSendOk int64
-// 			var sSendErr int64
-// 			var sSendTOut int64
-// 			var sSendReset int64
-// 			for k, v := range sProto[base.SEND] {
-// 				if k == base.OK {
-// 					sSendOk = v
-// 				} else {
-// 					sSendErr += v
-// 					switch k {
-// 					case base.TIMEOUT:
-// 						sSendTOut = v
-// 					case base.RESET:
-// 						sSendReset = v
-// 					}
-// 				}
-// 			}
-// 			fmt.Fprintf(w, "%s\t%s\t-\t-\t%.4f\t%.4f\t-\t-\t-\t%.4f\t%.4f\n",
-// 				timeStr, "UDP",
-// 				float64(sSendOk)/duration, float64(sSendErr)/duration,
-// 				float64(sSendTOut)/duration, float64(sSendReset)/duration)
-// 		}
-// 	}
-// 	w.Flush()
-// }
 
 func parseArgs() (config, error) {
 	var (
@@ -446,6 +334,15 @@ func main() {
 		os.Exit(1)
 	}
 
+	if len(config.GraphitePrefix) > 0 {
+		hostname, err := os.Hostname()
+		if err != nil {
+			fmt.Fprintf(os.Stderr, "%s\n", err.Error())
+			os.Exit(1)
+		}
+		config.GraphitePrefix = config.GraphitePrefix + ".carbontest." + strings.Split(hostname, ".")[0]
+	}
+
 	var graphite *GraphiteQueue
 	if len(config.Graphite) > 0 {
 		graphite, err = GraphiteInit(config.Graphite, config.GraphitePrefix, 100, 20)
@@ -539,7 +436,11 @@ func main() {
 	var uiter base.MetricIterator
 
 	if len(config.MetricFile) > 0 {
-		metrics, err := metriclist.LoadMetricFile(config.MetricFile, config.Min, config.Max, config.Incr)
+		var metricPing string
+		if len(config.GraphitePrefix) > 0 {
+			metricPing = config.GraphitePrefix + ".ping"
+		}
+		metrics, err := metriclist.LoadMetricFile(config.MetricFile, config.Min, config.Max, config.Incr, metricPing)
 		if err != nil {
 			fmt.Fprintf(os.Stderr, "%s\n", err.Error())
 			os.Exit(2)
