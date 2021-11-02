@@ -11,6 +11,9 @@ FORCE:
 $(NAME): FORCE
 	$(GO) build -ldflags "-X main.version=${VERSION}"
 
+static: FORCE
+	CGO_ENABLED=0 $(GO) build -ldflags "-X main.version=${VERSION}"
+
 debug: FORCE
 	$(GO) build -gcflags=all='-N -l' -ldflags "-X main.version=${VERSION}"
 
