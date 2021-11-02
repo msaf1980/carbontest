@@ -18,6 +18,7 @@ type ConStat struct {
 	Elapsed   int64
 	Error     base.NetErr
 	Size      int
+	Metrics   int
 }
 
 func ConStatNew(id int, proto base.Proto) *ConStat {

@@ -49,7 +49,11 @@ func TcpWorker(id int, c config, out chan<- ConStat, mdetail chan<- string, iter
 		if e.Action == base.CLOSE {
 			if con != nil {
 				err = flushWriter(w, c.Compress)
-				con.Close()
+				if err == nil {
+					err = con.Close()
+				} else {
+					con.Close()
+				}
 				con = nil
 				w = nil
 			}
@@ -83,7 +87,7 @@ func TcpWorker(id int, c config, out chan<- ConStat, mdetail chan<- string, iter
 		r.TimeStamp = start.UnixNano()
 		out <- *r
 		if err == nil {
-			if c.DetailFile != "" {
+			if len(c.DetailFile) > 0 {
 				mdetail <- e.Send
 			}
 		} else {
@@ -151,7 +155,7 @@ func UDPWorker(id int, c config, out chan<- ConStat, mdetail chan<- string, iter
 			r.Error = base.NetError(err)
 			r.Size = sended
 			if err == nil {
-				if c.DetailFile != "" {
+				if len(c.DetailFile) > 0 {
 					mdetail <- e.Send
 				}
 				count++

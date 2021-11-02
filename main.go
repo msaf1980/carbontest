@@ -2,11 +2,11 @@ package main
 
 import (
 	"bufio"
-	"flag"
 	"fmt"
 	"log"
 	"os"
 	"sort"
+	"strconv"
 
 	//"strconv"
 	"strings"
@@ -20,18 +20,21 @@ import (
 	"carbontest/pkg/base"
 	"carbontest/pkg/metricgen"
 	"carbontest/pkg/metriclist"
+
+	flag "github.com/spf13/pflag"
 )
 
 var cb *cyclicbarrier.CyclicBarrier
 
 var totalStat = map[base.Proto]map[base.NetOper]map[base.NetErr]int64{}
-var startTimestamp int64
 var stat = map[base.Proto]map[base.NetOper]map[base.NetErr]int64{}
-var aggrTime int
-var aggrTimestamp int64
+var startTimestamp int64
 var endTimestamp int64
 
-const aggrHeader = "time\tproto\tconn/s\tconn err/s\tsend/s\tsend err/s\tconn tout/s\tconn reset/s\tconn refused/s\tsend tout/s\tsend reset/s\n"
+// var aggrTime int
+// var aggrTimestamp int64
+
+const aggrHeader = "time\tproto\tconn/s\tconn err/s\tsend/s\tsend err/s\tconn tout/s\tconn reset/s\tconn refused/s\tsend tout/s\tsend reset/s\tsend eof/s\tresolve err/s\tlimit err/s\tbytes/s\n"
 
 //func pintStat(
 
@@ -65,47 +68,50 @@ type config struct {
 	MetricPrefix string // Prefix for generated metric name
 	Verbose      bool
 
+	AggrDuration   time.Duration
+	AggrFile       string // write aggregated connections stat to file
+	Graphite       string // address for graphite relay (for send aggregated connections stat)
+	GraphitePrefix string // prefix for graphite metric
+
 	StatFile   string // write connections stat to file
 	DetailFile string // write sended metrics to file
-	AggrFile   string // write aggregated connections stat to file
 	CPUProf    string // write cpu profile info to file
 }
 
 const header = "timestamp\tConId\tProto\tType\tStatus\tElapsed\tSize\n"
 
-func mergeStat(dest map[base.Proto]map[base.NetOper]map[base.NetErr]int64, source map[base.Proto]map[base.NetOper]map[base.NetErr]int64) {
-	for k1, v1 := range source {
-		_, ok := dest[k1]
-		if !ok {
-			dest[k1] = map[base.NetOper]map[base.NetErr]int64{}
-		}
-		for k2, v2 := range v1 {
-			_, ok := dest[k1][k2]
-			if !ok {
-				dest[k1][k2] = map[base.NetErr]int64{}
-			}
-			for k3, v3 := range v2 {
-				_, ok := dest[k1][k2]
-				if ok {
-					dest[k1][k2][k3] += v3
-				} else {
-					dest[k1][k2][k3] = v3
-				}
-			}
-		}
-	}
-}
+// func mergeStat(dest map[base.Proto]map[base.NetOper]map[base.NetErr]int64, source map[base.Proto]map[base.NetOper]map[base.NetErr]int64) {
+// 	for k1, v1 := range source {
+// 		_, ok := dest[k1]
+// 		if !ok {
+// 			dest[k1] = map[base.NetOper]map[base.NetErr]int64{}
+// 		}
+// 		for k2, v2 := range v1 {
+// 			_, ok := dest[k1][k2]
+// 			if !ok {
+// 				dest[k1][k2] = map[base.NetErr]int64{}
+// 			}
+// 			for k3, v3 := range v2 {
+// 				_, ok := dest[k1][k2]
+// 				if ok {
+// 					dest[k1][k2][k3] += v3
+// 				} else {
+// 					dest[k1][k2][k3] = v3
+// 				}
+// 			}
+// 		}
+// 	}
+// }
 
-func printStat() {
-
+func printStat(start, end time.Time) {
 	// Print stat
 	var statVal []string
-	duration := float64(endTimestamp-startTimestamp) / 1000000000.0
+	duration := end.Sub(start).Seconds()
 
 	for proto, opers := range totalStat {
 		for oper, errors := range opers {
 			for error, s := range errors {
-				v := fmt.Sprintf("%s.%s.%s %d (%.2f/s)\n", proto.String(), oper.String(), error.String(),
+				v := fmt.Sprintf("%s.%s.%s %d (%.4f/s)\n", proto.String(), oper.String(), error.String(),
 					s, float64(s)/duration)
 				statVal = append(statVal, v)
 			}
@@ -118,94 +124,156 @@ func printStat() {
 	}
 }
 
-func printAggrStat(w *bufio.Writer, timeStamp int64, duration float64, workers int, uworkers int) {
-	//timeStr := time.Unix(timeStamp/1000000000, 0).Format("2006-01-02T15:04:05-0700")
-	timeStr := time.Unix(timeStamp/1000000000, 0).Format(time.RFC3339)
+func printAggrStat(w *bufio.Writer, start, end time.Time, tcpStat, udpStat Stat, workers, uworkers int) {
+	timeStr := start.Format(time.RFC3339)
+	duration := end.Sub(start).Seconds()
 	if workers > 0 {
-		sProto, ok := stat[base.TCP]
-		if !ok {
-			fmt.Fprintf(w, "%s\t%s\t%.2f\t%.2f\t%.2f\t%.2f\t%.2f\t%.2f\t%.2f\t%.2f\t%.2f\t\n",
-				timeStr, "TCP", 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0)
-
-		} else {
-			var sConnOk int64
-			var sConnErr int64
-			var sConnTOut int64
-			var sConnReset int64
-			var sConnRefused int64
-			for k, v := range sProto[base.CONNECT] {
-				if k == base.OK {
-					sConnOk = v
-				} else {
-					sConnErr += v
-					switch k {
-					case base.TIMEOUT:
-						sConnTOut = v
-					case base.RESET:
-						sConnReset = v
-					case base.REFUSED:
-						sConnRefused = v
-					}
-				}
-			}
-
-			var sSendOk int64
-			var sSendErr int64
-			var sSendTOut int64
-			var sSendReset int64
-			for k, v := range sProto[base.SEND] {
-				if k == base.OK {
-					sSendOk = v
-				} else {
-					sSendErr += v
-					switch k {
-					case base.TIMEOUT:
-						sSendTOut = v
-					case base.RESET:
-						sSendReset = v
-					}
-				}
-			}
-			fmt.Fprintf(w, "%s\t%s\t%.2f\t%.2f\t%.2f\t%.2f\t%.2f\t%.2f\t%.2f\t%.2f\t%.2f\n",
-				timeStr, "TCP",
-				float64(sConnOk)/duration, float64(sConnErr)/duration,
-				float64(sSendOk)/duration, float64(sSendErr)/duration,
-				float64(sConnTOut)/duration, float64(sConnReset)/duration, float64(sConnRefused)/duration,
-				float64(sSendTOut)/duration, float64(sSendReset)/duration)
-		}
+		fmt.Fprintf(w, "%s\t%s\t%.4f\t%.4f\t%.4f\t%.4f\t%.4f\t%.4f\t%.4f\t%.4f\t%.4f\t%.4f\t%.4f\t%.4f\t%.4f\n",
+			timeStr, "TCP",
+			float64(tcpStat.conns)/duration, float64(tcpStat.connsErr)/duration,
+			float64(tcpStat.sends)/duration, float64(tcpStat.sendsErr)/duration,
+			float64(tcpStat.connsTout)/duration, float64(tcpStat.connsReset)/duration, float64(tcpStat.connsRefused)/duration,
+			float64(tcpStat.sendsTout)/duration, float64(tcpStat.sendsReset)/duration, float64(tcpStat.sendsEOF)/duration,
+			float64(tcpStat.connsResolve)/duration, float64(tcpStat.connsFileLimit)/duration,
+			float64(tcpStat.size)/duration,
+		)
 	}
 	if uworkers > 0 {
-		sProto, ok := stat[base.UDP]
-		if !ok {
-			fmt.Fprintf(w, "%s\t%s\t-\t-\t%.2f\t%.2f\t-\t-\t-\t%.2f\t%.2f\n",
-				timeStr, "UDP", 0.0, 0.0, 0.0, 0.0)
-
-		} else {
-			var sSendOk int64
-			var sSendErr int64
-			var sSendTOut int64
-			var sSendReset int64
-			for k, v := range sProto[base.SEND] {
-				if k == base.OK {
-					sSendOk = v
-				} else {
-					sSendErr += v
-					switch k {
-					case base.TIMEOUT:
-						sSendTOut = v
-					case base.RESET:
-						sSendReset = v
-					}
-				}
-			}
-			fmt.Fprintf(w, "%s\t%s\t-\t-\t%.2f\t%.2f\t-\t-\t-\t%.2f\t%.2f\n",
-				timeStr, "UDP",
-				float64(sSendOk)/duration, float64(sSendErr)/duration,
-				float64(sSendTOut)/duration, float64(sSendReset)/duration)
-		}
+		fmt.Fprintf(w, "%s\t%s\t%s\t%s\t%.4f\t%.4f\t%s\t%s\t%s\t%.4f\t%.4f\t%.4f\t%.4f\t%.4f\t%.4f\n",
+			timeStr, "UDP",
+			"-", "-",
+			float64(udpStat.sends)/duration, float64(udpStat.sendsErr)/duration,
+			"-", "-", "-",
+			float64(udpStat.sendsTout)/duration, float64(udpStat.sendsReset)/duration, float64(udpStat.sendsEOF)/duration,
+			float64(udpStat.sendsResolve)/duration, float64(udpStat.sendsFileLimit)/duration,
+			float64(udpStat.size)/duration,
+		)
 	}
-	w.Flush()
 }
+
+func sendAggrStat(graphite *GraphiteQueue, start, end time.Time, tcpStat, udpStat Stat, workers, uworkers int) {
+	timeStamp := start.Unix()
+	duration := end.Sub(start).Seconds()
+	if workers > 0 {
+		graphite.Put("carbontest.tcp.size_ps", strconv.FormatFloat(float64(tcpStat.size)/duration, 'g', 6, 64), timeStamp)
+
+		graphite.Put("carbontest.tcp.conns_ps", strconv.FormatFloat(float64(tcpStat.conns)/duration, 'g', 6, 64), timeStamp)
+		graphite.Put("carbontest.tcp.conns_err_ps", strconv.FormatFloat(float64(tcpStat.connsErr)/duration, 'g', 6, 64), timeStamp)
+		graphite.Put("carbontest.tcp.conns_tout_ps", strconv.FormatFloat(float64(tcpStat.connsTout)/duration, 'g', 6, 64), timeStamp)
+		graphite.Put("carbontest.tcp.conns_reset_ps", strconv.FormatFloat(float64(tcpStat.connsReset)/duration, 'g', 6, 64), timeStamp)
+		graphite.Put("carbontest.tcp.conns_refused_ps", strconv.FormatFloat(float64(tcpStat.connsRefused)/duration, 'g', 6, 64), timeStamp)
+
+		graphite.Put("carbontest.tcp.sends_ps", strconv.FormatFloat(float64(tcpStat.sends)/duration, 'g', 6, 64), timeStamp)
+		graphite.Put("carbontest.tcp.sends_err_ps", strconv.FormatFloat(float64(tcpStat.sendsErr)/duration, 'g', 6, 64), timeStamp)
+		graphite.Put("carbontest.tcp.sends_tout_ps", strconv.FormatFloat(float64(tcpStat.sendsTout)/duration, 'g', 6, 64), timeStamp)
+		graphite.Put("carbontest.tcp.sends_reset_ps", strconv.FormatFloat(float64(tcpStat.sendsReset)/duration, 'g', 6, 64), timeStamp)
+		graphite.Put("carbontest.tcp.sends_eof_ps", strconv.FormatFloat(float64(tcpStat.sendsEOF)/duration, 'g', 6, 64), timeStamp)
+
+		graphite.Put("carbontest.tcp.resolve_err_ps", strconv.FormatFloat(float64(tcpStat.connsResolve)/duration, 'g', 6, 64), timeStamp)
+		graphite.Put("carbontest.tcp.limits_err_ps", strconv.FormatFloat(float64(tcpStat.connsFileLimit)/duration, 'g', 6, 64), timeStamp)
+	}
+	if uworkers > 0 {
+		graphite.Put("carbontest.udp.size_ps", strconv.FormatFloat(float64(udpStat.size)/duration, 'g', 6, 64), timeStamp)
+
+		graphite.Put("carbontest.udp.sends_ps", strconv.FormatFloat(float64(udpStat.sends)/duration, 'g', 6, 64), timeStamp)
+		graphite.Put("carbontest.udp.sends_err_ps", strconv.FormatFloat(float64(udpStat.sendsErr)/duration, 'g', 6, 64), timeStamp)
+		graphite.Put("carbontest.udp.sends_tout_ps", strconv.FormatFloat(float64(udpStat.sendsTout)/duration, 'g', 6, 64), timeStamp)
+		graphite.Put("carbontest.udp.sends_reset_ps", strconv.FormatFloat(float64(udpStat.sendsReset)/duration, 'g', 6, 64), timeStamp)
+		graphite.Put("carbontest.udp.sends_eof_ps", strconv.FormatFloat(float64(udpStat.sendsEOF)/duration, 'g', 6, 64), timeStamp)
+
+		graphite.Put("carbontest.udp.resolve_err_ps", strconv.FormatFloat(float64(udpStat.connsResolve)/duration, 'g', 6, 64), timeStamp)
+		graphite.Put("carbontest.udp.limits_err_ps", strconv.FormatFloat(float64(udpStat.connsFileLimit)/duration, 'g', 6, 64), timeStamp)
+	}
+}
+
+// func printAggrStat(w *bufio.Writer, timeStamp int64, duration float64, workers int, uworkers int) {
+// 	//timeStr := time.Unix(timeStamp/1000000000, 0).Format("2006-01-02T15:04:05-0700")
+// 	timeStr := time.Unix(timeStamp/1000000000, 0).Format(time.RFC3339)
+// 	if workers > 0 {
+// 		sProto, ok := stat[base.TCP]
+// 		if !ok {
+// 			fmt.Fprintf(w, "%s\t%s\t%.4f\t%.4f\t%.4f\t%.4f\t%.4f\t%.4f\t%.4f\t%.4f\t%.4f\t\n",
+// 				timeStr, "TCP", 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0)
+
+// 		} else {
+// 			var sConnOk int64
+// 			var sConnErr int64
+// 			var sConnTOut int64
+// 			var sConnReset int64
+// 			var sConnRefused int64
+// 			for k, v := range sProto[base.CONNECT] {
+// 				if k == base.OK {
+// 					sConnOk = v
+// 				} else {
+// 					sConnErr += v
+// 					switch k {
+// 					case base.TIMEOUT:
+// 						sConnTOut = v
+// 					case base.RESET:
+// 						sConnReset = v
+// 					case base.REFUSED:
+// 						sConnRefused = v
+// 					}
+// 				}
+// 			}
+
+// 			var sSendOk int64
+// 			var sSendErr int64
+// 			var sSendTOut int64
+// 			var sSendReset int64
+// 			for k, v := range sProto[base.SEND] {
+// 				if k == base.OK {
+// 					sSendOk = v
+// 				} else {
+// 					sSendErr += v
+// 					switch k {
+// 					case base.TIMEOUT:
+// 						sSendTOut = v
+// 					case base.RESET:
+// 						sSendReset = v
+// 					}
+// 				}
+// 			}
+// 			fmt.Fprintf(w, "%s\t%s\t%.4f\t%.4f\t%.4f\t%.4f\t%.4f\t%.4f\t%.4f\t%.4f\t%.4f\n",
+// 				timeStr, "TCP",
+// 				float64(sConnOk)/duration, float64(sConnErr)/duration,
+// 				float64(sSendOk)/duration, float64(sSendErr)/duration,
+// 				float64(sConnTOut)/duration, float64(sConnReset)/duration, float64(sConnRefused)/duration,
+// 				float64(sSendTOut)/duration, float64(sSendReset)/duration)
+// 		}
+// 	}
+// 	if uworkers > 0 {
+// 		sProto, ok := stat[base.UDP]
+// 		if !ok {
+// 			fmt.Fprintf(w, "%s\t%s\t-\t-\t%.4f\t%.4f\t-\t-\t-\t%.4f\t%.4f\n",
+// 				timeStr, "UDP", 0.0, 0.0, 0.0, 0.0)
+
+// 		} else {
+// 			var sSendOk int64
+// 			var sSendErr int64
+// 			var sSendTOut int64
+// 			var sSendReset int64
+// 			for k, v := range sProto[base.SEND] {
+// 				if k == base.OK {
+// 					sSendOk = v
+// 				} else {
+// 					sSendErr += v
+// 					switch k {
+// 					case base.TIMEOUT:
+// 						sSendTOut = v
+// 					case base.RESET:
+// 						sSendReset = v
+// 					}
+// 				}
+// 			}
+// 			fmt.Fprintf(w, "%s\t%s\t-\t-\t%.4f\t%.4f\t-\t-\t-\t%.4f\t%.4f\n",
+// 				timeStr, "UDP",
+// 				float64(sSendOk)/duration, float64(sSendErr)/duration,
+// 				float64(sSendTOut)/duration, float64(sSendReset)/duration)
+// 		}
+// 	}
+// 	w.Flush()
+// }
 
 func parseArgs() (config, error) {
 	var (
@@ -224,31 +292,38 @@ func parseArgs() (config, error) {
 		inc          string
 	)
 
-	flag.StringVar(&host, "host", "127.0.0.1", "hostname")
-	flag.IntVar(&port, "port", 2003, "port")
-	flag.IntVar(&config.Workers, "workers", 10, "TCP workers")
-	flag.StringVar(&duration, "duration", "60s", "total test duration")
-	flag.IntVar(&config.Metrics, "metrics", 1, "metrics sended in one TCP connection")
-	flag.IntVar(&config.BatchSend, "batch", 1, "metrics count in one TCP send")
-	flag.IntVar(&config.UWorkers, "uworkers", 0, "UDP workers (default 0)")
-	flag.IntVar(&config.UBatchSend, "ubatch", 1, "metrics count in one UDP send")
-	flag.StringVar(&config.MetricPrefix, "prefix", "test", "metric prefix")
+	flag.StringVarP(&host, "host", "r", "127.0.0.1", "hostname")
+	flag.IntVarP(&port, "port", "p", 2003, "port")
 
-	flag.StringVar(&config.MetricFile, "file", "", "metrics file (format: Name [min[:max[:increment]]")
+	flag.IntVarP(&config.Workers, "workers", "w", 10, "TCP workers")
+	flag.StringVarP(&duration, "duration", "d", "60s", "total test duration")
+	flag.IntVarP(&config.Metrics, "metrics", "m", 1, "metrics sended in one TCP connection")
+	flag.IntVarP(&config.BatchSend, "batch", "b", 1, "metrics count in one TCP send")
+
+	flag.IntVarP(&config.UWorkers, "uworkers", "u", 0, "UDP workers (default 0)")
+	flag.IntVarP(&config.UBatchSend, "ubatch", "B", 1, "metrics count in one UDP send")
+
+	flag.StringVarP(&config.MetricPrefix, "prefix", "P", "test", "metric prefix")
+
+	flag.StringVarP(&config.MetricFile, "file", "f", "", "metrics file (format: Name [min[:max[:increment]]")
 	flag.StringVar(&min, "min", "0", "default min value for metrics file")
 	flag.StringVar(&max, "max", "0", "default max value for metrics file")
 	flag.StringVar(&inc, "incr", "0", "default incr value for metrics file (if 0 - value is random, also increase until max, than descrease to min)")
 
-	flag.StringVar(&conTimeout, "c", "100ms", "TCP connect timeout (ms)")
-	flag.StringVar(&sendTimeout, "s", "500ms", "TCP send timeout (ms)")
+	flag.StringVarP(&conTimeout, "con_timeout", "c", "100ms", "TCP connect timeout (ms)")
+	flag.StringVarP(&sendTimeout, "send_timeout", "s", "500ms", "TCP send timeout (ms)")
 
-	flag.StringVar(&sendDelay, "delay", "0s", "send delay random range (min[:max])")
+	flag.StringVarP(&sendDelay, "delay", "D", "0s", "send delay random range (min[:max])")
 	flag.IntVar(&rateLimit, "rate", 0, "rate limit/s")
 
-	flag.BoolVar(&config.Verbose, "verbose", false, "verbose")
+	flag.BoolVarP(&config.Verbose, "verbose", "v", false, "verbose")
 
-	flag.StringVar(&config.StatFile, "stat", "", "stat file")
-	flag.StringVar(&config.AggrFile, "aggr", "", "sended metrics file (appended)")
+	flag.DurationVarP(&config.AggrDuration, "aduration", "A", time.Minute, "aggregation duration")
+	flag.StringVarP(&config.AggrFile, "aggr", "a", "", "sended metrics file (appended)")
+	flag.StringVarP(&config.Graphite, "graphite", "g", "", "graphite relay address:port")
+	flag.StringVarP(&config.GraphitePrefix, "gprefix", "G", "test.carbontest", "metric prefix for aggregated stat")
+
+	flag.StringVar(&config.StatFile, "stat", "", "sended metrics stat file (appended)")
 	flag.StringVar(&config.DetailFile, "detail", "", "sended metrics file (appended)")
 
 	flag.StringVar(&config.CPUProf, "cpuprofile", "", "write cpu profile to file")
@@ -356,6 +431,10 @@ func parseArgs() (config, error) {
 
 	config.Addr = fmt.Sprintf("%s:%d", host, port)
 
+	if config.AggrDuration < 10*time.Second {
+		return config, fmt.Errorf("Invalid aggregation duration: %v", config.AggrDuration)
+	}
+
 	return config, nil
 }
 
@@ -365,6 +444,16 @@ func main() {
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "%s\n", err.Error())
 		os.Exit(1)
+	}
+
+	var graphite *GraphiteQueue
+	if len(config.Graphite) > 0 {
+		graphite, err = GraphiteInit(config.Graphite, config.GraphitePrefix, 100, 20)
+		if err != nil {
+			fmt.Fprintf(os.Stderr, "%s\n", err.Error())
+			os.Exit(1)
+		}
+		graphite.Run()
 	}
 
 	var file *os.File
@@ -505,8 +594,13 @@ func main() {
 	log.Printf("Starting TCP workers: %d, UDP %d\n", config.Workers, config.UWorkers)
 	cb.Await()
 
-	const aggrDuration = 60
+	begin := time.Now()
+	var end time.Time
 
+	aggrTicker := time.Tick(config.AggrDuration)
+
+	var udpStat Stat
+	var tcpStat Stat
 LOOP:
 	for {
 		select {
@@ -515,6 +609,18 @@ LOOP:
 			if err != nil {
 				panic(err)
 			}
+		case <-aggrTicker:
+			end = time.Now()
+			if aw != nil {
+				printAggrStat(aw, begin, end, tcpStat, udpStat, config.Workers, config.UWorkers)
+				aw.Flush()
+			}
+			if graphite != nil {
+				sendAggrStat(graphite, begin, end, tcpStat, udpStat, config.Workers, config.UWorkers)
+			}
+			tcpStat.Clear()
+			udpStat.Clear()
+			begin = end
 		case r := <-result:
 			if r.TimeStamp == 0 {
 				if r.Proto == base.TCP {
@@ -526,32 +632,26 @@ LOOP:
 					break LOOP
 				}
 			} else {
-				if r.TimeStamp+r.Elapsed > endTimestamp {
-					endTimestamp = r.TimeStamp + r.Elapsed
-				}
-				if r.TimeStamp < startTimestamp || startTimestamp == 0 {
-					startTimestamp = r.TimeStamp
-				}
-
-				if aw != nil {
-					// round to minute
-					endTime := int(endTimestamp / (1000 * 1000 * 1000 * aggrDuration))
-					if endTime > aggrTime {
-						// flush aggregated stat
-						if aggrTime > 0 {
-							if aw != nil {
-								printAggrStat(aw, aggrTimestamp, float64(endTimestamp-aggrTimestamp)/1000000000.0, config.Workers, config.UWorkers)
-							}
-						}
-						aggrTimestamp = endTimestamp
-						aggrTime = endTime
-
-						// merge stat
-						mergeStat(totalStat, stat)
-
-						stat = make(map[base.Proto]map[base.NetOper]map[base.NetErr]int64)
+				if graphite != nil || aw != nil {
+					if r.Proto == base.TCP {
+						tcpStat.Add(&r)
+					} else {
+						udpStat.Add(&r)
 					}
 				}
+
+				sProto, ok := totalStat[r.Proto]
+				if !ok {
+					sProto = map[base.NetOper]map[base.NetErr]int64{}
+					totalStat[r.Proto] = sProto
+				}
+				sOper, ok := sProto[r.Type]
+				if !ok {
+					sOper = map[base.NetErr]int64{}
+					sProto[r.Type] = sOper
+				}
+				sOper[r.Error]++
+
 				// write to stat file
 				if w != nil {
 					timeStr := time.Unix(r.TimeStamp/1000000000, r.TimeStamp%1000000000).Format(time.RFC3339Nano)
@@ -560,26 +660,60 @@ LOOP:
 						r.Error.String(), r.Elapsed/1000, r.Size)
 				}
 
-				sProto, ok := stat[r.Proto]
-				if !ok {
-					sProto = map[base.NetOper]map[base.NetErr]int64{}
-					stat[r.Proto] = sProto
-				}
-				sOper, ok := sProto[r.Type]
-				if !ok {
-					sOper = map[base.NetErr]int64{}
-					sProto[r.Type] = sOper
-				}
-				_, ok = sOper[r.Error]
-				if !ok {
-					sOper[r.Error] = 1
-				} else {
-					sOper[r.Error]++
-				}
+				// if r.TimeStamp+r.Elapsed > endTimestamp {
+				// 	endTimestamp = r.TimeStamp + r.Elapsed
+				// }
+				// if r.TimeStamp < startTimestamp || startTimestamp == 0 {
+				// 	startTimestamp = r.TimeStamp
+				// }
+
+				// if aw != nil {
+				// 	// round to minute
+				// 	endTime := int(endTimestamp / (1000 * 1000 * 1000 * aggrDuration))
+				// 	if endTime > aggrTime {
+				// 		// flush aggregated stat
+				// 		if aggrTime > 0 {
+				// 			if aw != nil {
+				// 				printAggrStat(aw, aggrTimestamp, float64(endTimestamp-aggrTimestamp)/1000000000.0, config.Workers, config.UWorkers)
+				// 			}
+				// 		}
+				// 		aggrTimestamp = endTimestamp
+				// 		aggrTime = endTime
+
+				// 		// merge stat
+				// 		mergeStat(totalStat, stat)
+
+				// 		stat = make(map[base.Proto]map[base.NetOper]map[base.NetErr]int64)
+				// 	}
+				// }
+				// // write to stat file
+				// if w != nil {
+				// 	timeStr := time.Unix(r.TimeStamp/1000000000, r.TimeStamp%1000000000).Format(time.RFC3339Nano)
+				// 	fmt.Fprintf(w, "%s\t%d\t%s\t%s\t%s\t%d\t%d\n", timeStr, r.Id,
+				// 		r.Proto.String(), r.Type.String(),
+				// 		r.Error.String(), r.Elapsed/1000, r.Size)
+				// }
+
+				// sProto, ok := stat[r.Proto]
+				// if !ok {
+				// 	sProto = map[base.NetOper]map[base.NetErr]int64{}
+				// 	stat[r.Proto] = sProto
+				// }
+				// sOper, ok := sProto[r.Type]
+				// if !ok {
+				// 	sOper = map[base.NetErr]int64{}
+				// 	sProto[r.Type] = sOper
+				// }
+				// _, ok = sOper[r.Error]
+				// if !ok {
+				// 	sOper[r.Error] = 1
+				// } else {
+				// 	sOper[r.Error]++
+				// }
 			}
 		}
 	}
-	end := time.Now()
+	end = time.Now()
 	duration := end.Sub(start)
 	log.Printf("Shutdown. Test Duration %s", duration)
 	if config.AggrFile != "" {
@@ -591,14 +725,11 @@ LOOP:
 	if config.DetailFile != "" {
 		fmt.Printf("sended metrics writed to %s\n", config.DetailFile)
 	}
-	if len(stat) > 0 {
-		mergeStat(totalStat, stat)
-		if aw != nil {
-			printAggrStat(aw, aggrTimestamp, float64(endTimestamp-aggrTimestamp)/1000000000.0, config.Workers, config.UWorkers)
-		}
+	if aw != nil {
+		printAggrStat(aw, begin, end, tcpStat, udpStat, config.Workers, config.UWorkers)
 	}
 
-	printStat()
+	printStat(start, end)
 
 	if w != nil {
 		err = w.Flush()
@@ -625,4 +756,7 @@ LOOP:
 			panic(err)
 		}
 	}
+
+	time.Sleep(2 * time.Second)
+	graphite.Stop()
 }
