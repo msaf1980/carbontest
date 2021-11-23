@@ -212,7 +212,7 @@ func parseArgs() (config, error) {
 	flag.StringVarP(&config.GraphitePrefix, "gprefix", "G", "test.carbontest", "metric prefix for aggregated stat")
 
 	flag.StringVar(&config.StatFile, "stat", "", "sended metrics stat file (appended)")
-	flag.StringVar(&config.DetailFile, "detail", "", "sended metrics file (appended)")
+	flag.StringVar(&config.DetailFile, "detail", "", "sended metrics (with value/timestamp) file (appended)")
 
 	flag.StringVar(&config.CPUProf, "cpuprofile", "", "write cpu profile to file")
 
