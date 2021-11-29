@@ -136,30 +136,30 @@ func sendAggrStat(graphite *GraphiteQueue, start, end time.Time, tcpStat, udpSta
 
 		graphite.Put("tcp.conns_ps", strconv.FormatFloat(float64(tcpStat.conns)/duration, 'g', 6, 64), timeStamp)
 		graphite.Put("tcp.conns_err_ps", strconv.FormatFloat(float64(tcpStat.connsErr)/duration, 'g', 6, 64), timeStamp)
-		graphite.Put("tcp.conns_tout_ps", strconv.FormatFloat(float64(tcpStat.connsTout)/duration, 'g', 6, 64), timeStamp)
-		graphite.Put("tcp.conns_reset_ps", strconv.FormatFloat(float64(tcpStat.connsReset)/duration, 'g', 6, 64), timeStamp)
-		graphite.Put("tcp.conns_refused_ps", strconv.FormatFloat(float64(tcpStat.connsRefused)/duration, 'g', 6, 64), timeStamp)
+		graphite.Put("tcp.conns_err.detail.tout_ps", strconv.FormatFloat(float64(tcpStat.connsTout)/duration, 'g', 6, 64), timeStamp)
+		graphite.Put("tcp.conns_err.detail.reset_ps", strconv.FormatFloat(float64(tcpStat.connsReset)/duration, 'g', 6, 64), timeStamp)
+		graphite.Put("tcp.conns_err.detail.refused_ps", strconv.FormatFloat(float64(tcpStat.connsRefused)/duration, 'g', 6, 64), timeStamp)
 
 		graphite.Put("tcp.sends_ps", strconv.FormatFloat(float64(tcpStat.sends)/duration, 'g', 6, 64), timeStamp)
 		graphite.Put("tcp.sends_err_ps", strconv.FormatFloat(float64(tcpStat.sendsErr)/duration, 'g', 6, 64), timeStamp)
-		graphite.Put("tcp.sends_tout_ps", strconv.FormatFloat(float64(tcpStat.sendsTout)/duration, 'g', 6, 64), timeStamp)
-		graphite.Put("tcp.sends_reset_ps", strconv.FormatFloat(float64(tcpStat.sendsReset)/duration, 'g', 6, 64), timeStamp)
-		graphite.Put("tcp.sends_eof_ps", strconv.FormatFloat(float64(tcpStat.sendsEOF)/duration, 'g', 6, 64), timeStamp)
+		graphite.Put("tcp.sends_err.detail.tout_ps", strconv.FormatFloat(float64(tcpStat.sendsTout)/duration, 'g', 6, 64), timeStamp)
+		graphite.Put("tcp.sends_err.detail.reset_ps", strconv.FormatFloat(float64(tcpStat.sendsReset)/duration, 'g', 6, 64), timeStamp)
+		graphite.Put("tcp.sends_err.detail.eof_ps", strconv.FormatFloat(float64(tcpStat.sendsEOF)/duration, 'g', 6, 64), timeStamp)
 
-		graphite.Put("tcp.resolve_err_ps", strconv.FormatFloat(float64(tcpStat.connsResolve)/duration, 'g', 6, 64), timeStamp)
-		graphite.Put("tcp.limits_err_ps", strconv.FormatFloat(float64(tcpStat.connsFileLimit)/duration, 'g', 6, 64), timeStamp)
+		graphite.Put("tcp.conns_err.detail.resolve_err_ps", strconv.FormatFloat(float64(tcpStat.connsResolve)/duration, 'g', 6, 64), timeStamp)
+		graphite.Put("tcp.conns_err.detail.limits_err_ps", strconv.FormatFloat(float64(tcpStat.connsFileLimit)/duration, 'g', 6, 64), timeStamp)
 	}
 	if uworkers > 0 {
 		graphite.Put("udp.size_ps", strconv.FormatFloat(float64(udpStat.size)/duration, 'g', 6, 64), timeStamp)
 
 		graphite.Put("udp.sends_ps", strconv.FormatFloat(float64(udpStat.sends)/duration, 'g', 6, 64), timeStamp)
 		graphite.Put("udp.sends_err_ps", strconv.FormatFloat(float64(udpStat.sendsErr)/duration, 'g', 6, 64), timeStamp)
-		graphite.Put("udp.sends_tout_ps", strconv.FormatFloat(float64(udpStat.sendsTout)/duration, 'g', 6, 64), timeStamp)
-		graphite.Put("udp.sends_reset_ps", strconv.FormatFloat(float64(udpStat.sendsReset)/duration, 'g', 6, 64), timeStamp)
-		graphite.Put("udp.sends_eof_ps", strconv.FormatFloat(float64(udpStat.sendsEOF)/duration, 'g', 6, 64), timeStamp)
+		graphite.Put("udp.sends_err.detail.tout_ps", strconv.FormatFloat(float64(udpStat.sendsTout)/duration, 'g', 6, 64), timeStamp)
+		graphite.Put("udp.sends_err.detail.reset_ps", strconv.FormatFloat(float64(udpStat.sendsReset)/duration, 'g', 6, 64), timeStamp)
+		graphite.Put("udp.sends_err.detail.eof_ps", strconv.FormatFloat(float64(udpStat.sendsEOF)/duration, 'g', 6, 64), timeStamp)
 
-		graphite.Put("udp.resolve_err_ps", strconv.FormatFloat(float64(udpStat.connsResolve)/duration, 'g', 6, 64), timeStamp)
-		graphite.Put("udp.limits_err_ps", strconv.FormatFloat(float64(udpStat.connsFileLimit)/duration, 'g', 6, 64), timeStamp)
+		graphite.Put("udp.sends_err.detail.resolve_err_ps", strconv.FormatFloat(float64(udpStat.connsResolve)/duration, 'g', 6, 64), timeStamp)
+		graphite.Put("udp.sends_err.detail.limits_err_ps", strconv.FormatFloat(float64(udpStat.connsFileLimit)/duration, 'g', 6, 64), timeStamp)
 	}
 }
 
