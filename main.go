@@ -2,6 +2,7 @@ package main
 
 import (
 	"bufio"
+	"errors"
 	"fmt"
 	"log"
 	"os"
@@ -40,6 +41,24 @@ const aggrHeader = "time\tproto\tconn/s\tconn err/s\tsend/s\tsend err/s\tconn to
 
 var running = true
 
+type StringSlice []string
+
+func (u *StringSlice) Set(value string) error {
+	if len(value) == 0 {
+		return errors.New("empty file")
+	}
+	*u = append(*u, value)
+	return nil
+}
+
+func (u *StringSlice) String() string {
+	return "[ " + strings.Join(*u, ", ") + " ]"
+}
+
+func (u *StringSlice) Type() string {
+	return "[]string"
+}
+
 type config struct {
 	Addr string
 	//Connections int
@@ -48,10 +67,10 @@ type config struct {
 	Metrics   int
 	BatchSend int
 
-	MetricFile string
-	Min        int32
-	Max        int32
-	Incr       int32
+	MetricFiles StringSlice
+	Min         int32
+	Max         int32
+	Incr        int32
 
 	Compress base.CompressType
 
@@ -193,7 +212,7 @@ func parseArgs() (config, error) {
 
 	flag.StringVarP(&config.MetricPrefix, "prefix", "P", "test", "metric prefix")
 
-	flag.StringVarP(&config.MetricFile, "file", "f", "", "metrics file (format: Name [min[:max[:increment]]")
+	flag.VarP(&config.MetricFiles, "file", "f", "metrics file (format: Name [min[:max[:increment]]")
 	flag.StringVar(&min, "min", "0", "default min value for metrics file")
 	flag.StringVar(&max, "max", "0", "default max value for metrics file")
 	flag.StringVar(&inc, "incr", "0", "default incr value for metrics file (if 0 - value is random, also increase until max, than descrease to min)")
@@ -435,12 +454,12 @@ func main() {
 	var titer base.MetricIterator
 	var uiter base.MetricIterator
 
-	if len(config.MetricFile) > 0 {
+	if len(config.MetricFiles) > 0 {
 		var metricPing string
 		if len(config.GraphitePrefix) > 0 {
 			metricPing = config.GraphitePrefix + ".ping"
 		}
-		metrics, err := metriclist.LoadMetricFile(config.MetricFile, config.Min, config.Max, config.Incr, metricPing)
+		metrics, err := metriclist.LoadMetricFile(config.MetricFiles, config.Min, config.Max, config.Incr, metricPing)
 		if err != nil {
 			fmt.Fprintf(os.Stderr, "%s\n", err.Error())
 			os.Exit(2)

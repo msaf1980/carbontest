@@ -136,71 +136,86 @@ func New(metrics []metric, workers int, batch int, samples int,
 	return m, nil
 }
 
-func LoadMetricFile(filename string, valueMin, valueMax, valueInc int32, metricPing string) ([]metric, error) {
-	file, err := os.Open(filename)
-	if err != nil {
-		return nil, err
-	}
+func LoadMetricFile(filenames []string, valueMin, valueMax, valueInc int32, metricPing string) ([]metric, error) {
+	var (
+		file *os.File
+		err  error
+	)
 
-	defer file.Close()
+	defer func() {
+		if file != nil {
+			file.Close()
+		}
+	}()
 
 	metrics := make([]metric, 0, 1024)
-
-	reader := bufio.NewReader(file)
-
-	n := 0
-	buf := make([]string, 4)
-	for {
-		n++
-		line, err := reader.ReadString('\n')
+	for _, filename := range filenames {
+		file, err = os.Open(filename)
 		if err != nil {
-			break
+			return nil, err
 		}
-		//fmt.Printf("%s \n", line)
-		v, n := stringutils.SplitN(strings.TrimRight(line, "\n"), " ", buf)
-		m := metric{name: v[0]}
-		if len(v) > 2 {
-			return metrics, fmt.Errorf("%d line incorrect", n)
-		}
-		if len(v) == 1 {
-			m.min = valueMin
-			m.max = valueMax
-			m.incr = valueInc
-		} else if len(v) == 2 {
-			vv, n := stringutils.SplitN(v[1], ":", buf)
-			if len(v) > 3 {
-				return metrics, fmt.Errorf("%d line values field incorrect", n)
-			}
-			m.min, err = base.ParseInt32(vv[0], 10)
+
+		reader := bufio.NewReader(file)
+
+		n := 0
+		buf := make([]string, 4)
+		for {
+			n++
+			line, err := reader.ReadString('\n')
 			if err != nil {
-				return metrics, fmt.Errorf("%d line min value field incorrect", n)
+				break
 			}
-			if len(vv) == 1 {
-				m.max = m.min
+			//fmt.Printf("%s \n", line)
+			v, n := stringutils.SplitN(strings.TrimRight(line, "\n"), " ", buf)
+			m := metric{name: v[0]}
+			if len(v) > 2 {
+				return metrics, fmt.Errorf("filename %s: %d line incorrect", filename, n)
 			}
-			if len(vv) >= 2 {
-				m.max, err = base.ParseInt32(vv[1], 10)
-				if err != nil {
-					return metrics, fmt.Errorf("%d line max value field incorrect", n)
+			if len(v) == 1 {
+				m.min = valueMin
+				m.max = valueMax
+				m.incr = valueInc
+			} else if len(v) == 2 {
+				vv, n := stringutils.SplitN(v[1], ":", buf)
+				if len(v) > 3 {
+					return metrics, fmt.Errorf("filename %s: %d line values field incorrect", filename, n)
 				}
-				if len(vv) == 3 {
-					m.incr, err = base.ParseInt32(vv[2], 10)
+				m.min, err = base.ParseInt32(vv[0], 10)
+				if err != nil {
+					return metrics, fmt.Errorf("filename %s: %d line min value field incorrect", filename, n)
+				}
+				if len(vv) == 1 {
+					m.max = m.min
+				}
+				if len(vv) >= 2 {
+					m.max, err = base.ParseInt32(vv[1], 10)
 					if err != nil {
-						return metrics, fmt.Errorf("%d line increment value field incorrect", n)
+						return metrics, fmt.Errorf("filename %s: %d line max value field incorrect", filename, n)
+					}
+					if len(vv) == 3 {
+						m.incr, err = base.ParseInt32(vv[2], 10)
+						if err != nil {
+							return metrics, fmt.Errorf("filename %s: %d line increment value field incorrect", filename, n)
+						}
 					}
 				}
 			}
+			m.last = m.min
+			metrics = append(metrics, m)
 		}
-		m.last = m.min
-		metrics = append(metrics, m)
-	}
-	if err == io.EOF {
-		err = nil
+		if err != nil {
+			if err == io.EOF {
+				err = nil
+			}
+			return metrics, fmt.Errorf("filename %s: %v", filename, err)
+		}
+		file.Close()
+		file = nil
 	}
 
 	if len(metricPing) > 0 {
 		metrics = append(metrics, metric{name: metricPing, min: 1, max: 1})
 	}
 
-	return metrics, err
+	return metrics, nil
 }
