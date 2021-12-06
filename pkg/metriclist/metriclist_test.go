@@ -45,7 +45,7 @@ func TestMetricListIterator_Next(t *testing.T) {
 	var max int32 = 7
 	var incr int32 = 3
 	workers := 16
-	metrics, err := LoadMetricFile([]string{"test/metrics2.txt", "test/metrics.txt"}, min, max, incr, "ping")
+	metrics, err := LoadMetricFile([]string{"test/metrics2.txt.gz", "test/metrics.txt"}, min, max, incr, "ping")
 	if err != nil {
 		t.Error(err)
 	}

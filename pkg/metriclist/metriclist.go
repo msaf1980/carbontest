@@ -3,6 +3,7 @@ package metriclist
 import (
 	"bufio"
 	"carbontest/pkg/base"
+	"compress/gzip"
 	"fmt"
 	"io"
 	"os"
@@ -155,7 +156,17 @@ func LoadMetricFile(filenames []string, valueMin, valueMax, valueInc int32, metr
 			return nil, err
 		}
 
-		reader := bufio.NewReader(file)
+		var reader *bufio.Reader
+
+		if strings.HasSuffix(filename, ".gz") {
+			gzipReader, err := gzip.NewReader(file)
+			if err != nil {
+				return nil, err
+			}
+			reader = bufio.NewReader(gzipReader)
+		} else {
+			reader = bufio.NewReader(file)
+		}
 
 		n := 0
 		buf := make([]string, 4)

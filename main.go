@@ -212,7 +212,7 @@ func parseArgs() (config, error) {
 
 	flag.StringVarP(&config.MetricPrefix, "prefix", "P", "test", "metric prefix")
 
-	flag.VarP(&config.MetricFiles, "file", "f", "metrics file (format: Name [min[:max[:increment]]")
+	flag.VarP(&config.MetricFiles, "file", "f", "metrics file (valid: plain text, gz) (format: Name [min[:max[:increment]]")
 	flag.StringVar(&min, "min", "0", "default min value for metrics file")
 	flag.StringVar(&max, "max", "0", "default max value for metrics file")
 	flag.StringVar(&inc, "incr", "0", "default incr value for metrics file (if 0 - value is random, also increase until max, than descrease to min)")
