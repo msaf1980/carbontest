@@ -10,7 +10,7 @@ import (
 
 func TestMetricGenIterator(t *testing.T) {
 	workers := 16
-	m, err := New("prefix", workers, 2, 4, 0, 0)
+	m, err := New("prefix", workers, 2, 4, base.RandomDuration{Min: 0, Max: 0})
 	if err != nil {
 		t.Error(err)
 	}
@@ -41,7 +41,7 @@ func TestMetricGenIterator(t *testing.T) {
 
 func BenchmarkMetricGenIteratorNext(b *testing.B) {
 	workers := 16
-	m, err := New("prefix", workers, 300000000, 1, 1, 1)
+	m, err := New("prefix", workers, 300000000, 1, base.RandomDuration{Min: 1, Max: 1})
 	if err != nil {
 		b.Error(err)
 	}
@@ -53,7 +53,7 @@ func BenchmarkMetricGenIteratorNext(b *testing.B) {
 
 func BenchmarkMetricGenIteratorNextBatch(b *testing.B) {
 	workers := 16
-	m, err := New("prefix", workers, 300000000, 10, 10, 1)
+	m, err := New("prefix", workers, 300000000, 10, base.RandomDuration{Min: 10, Max: 1})
 	if err != nil {
 		b.Error(err)
 	}

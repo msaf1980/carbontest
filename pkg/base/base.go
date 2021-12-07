@@ -1,11 +1,13 @@
 package base
 
 import (
+	"fmt"
 	"io"
 	"math/rand"
 	"net"
 	"strconv"
 	"strings"
+	"time"
 )
 
 type Proto int
@@ -112,7 +114,7 @@ func (err *NetErr) String() string {
 
 type Event struct {
 	Action NetOper
-	Delay  int64
+	Delay  time.Duration
 	Send   string
 }
 
@@ -121,7 +123,7 @@ func ParseInt32(s string, base int) (int32, error) {
 	return int32(n), err
 }
 
-func RandomValue(min, max int32) int32 {
+func RandomIn32(min, max int32) int32 {
 	if max > min {
 		return rand.Int31n(max-min) + min
 	} else {
@@ -129,12 +131,66 @@ func RandomValue(min, max int32) int32 {
 	}
 }
 
-func RandomDuration(min, max int64) int64 {
+func RandomInt64(min, max int64) int64 {
 	if max > min {
 		return rand.Int63n(max-min) + min
 	} else {
 		return min
 	}
+}
+
+type RandomDuration struct {
+	Min int64 // nanoseconds
+	Max int64 // nanoseconds
+}
+
+func (r *RandomDuration) IsZero() bool {
+	return r.Min == 0
+}
+
+func (r *RandomDuration) Set(value string) error {
+	values := strings.Split(value, ":")
+	if len(values) >= 1 {
+		min, err := time.ParseDuration(values[0])
+		if err != nil || min < 0 {
+			return fmt.Errorf("Invalid min delay value: %s", values[0])
+		}
+		r.Min = min.Nanoseconds()
+	}
+	if len(values) == 1 {
+		r.Max = r.Min
+	} else if len(values) == 2 {
+		max, err := time.ParseDuration(values[1])
+		if err != nil || max < 0 {
+			return fmt.Errorf("Invalid max delay value: %s", values[1])
+		}
+		r.Max = max.Nanoseconds()
+		if r.Min > r.Max {
+			r.Min, r.Max = r.Max, r.Min
+		}
+	} else {
+		return fmt.Errorf("Invalid delay value: %s", value)
+	}
+
+	return nil
+}
+
+func (r *RandomDuration) String() string {
+	if r.Min == r.Max {
+		return strconv.FormatInt(r.Min, 10)
+	}
+	return strconv.FormatInt(r.Min, 10) + ":" + strconv.FormatInt(r.Max, 10)
+}
+
+func (r *RandomDuration) Type() string {
+	return "time.Duration[:time.Duration]"
+}
+
+func (r *RandomDuration) Random() time.Duration {
+	if r.Max <= r.Min {
+		return time.Duration(r.Min)
+	}
+	return time.Duration(RandomInt64(r.Min, r.Max))
 }
 
 type MetricIterator interface {

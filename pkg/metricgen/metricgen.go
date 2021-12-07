@@ -4,6 +4,7 @@ import (
 	"carbontest/pkg/base"
 	"fmt"
 	"strconv"
+	"time"
 
 	stringutils "github.com/msaf1980/go-stringutils"
 )
@@ -19,9 +20,8 @@ type record struct {
 }
 
 type MetricGenIterator struct {
-	data     []record // workers state
-	minDelay int64
-	maxDelay int64
+	data  []record // workers state
+	delay base.RandomDuration
 }
 
 func (m *MetricGenIterator) Reset(worker int) {
@@ -34,13 +34,13 @@ func (m *MetricGenIterator) Next(worker int, timestamp int64) base.Event {
 		m.Reset(worker)
 		return base.Event{base.CLOSE, 0, ""}
 	} else {
-		var delay int64
+		var delay time.Duration
 		action := base.SEND
 		m.data[worker].iteration++
 		if m.data[worker].biter >= m.data[worker].batch {
 			m.data[worker].biter = 1
 			action = base.FLUSH
-			delay = base.RandomDuration(m.minDelay, m.maxDelay)
+			delay = m.delay.Random()
 		} else {
 			m.data[worker].biter++
 		}
@@ -64,7 +64,7 @@ func (m *MetricGenIterator) Next(worker int, timestamp int64) base.Event {
 	}
 }
 
-func New(metricPrefix string, workers int, batch int, samples int, minDelay int64, maxDelay int64) (*MetricGenIterator, error) {
+func New(metricPrefix string, workers int, batch int, samples int, delay base.RandomDuration) (*MetricGenIterator, error) {
 	data := make([]record, workers)
 	if batch < 0 {
 		batch = 1
@@ -79,7 +79,7 @@ func New(metricPrefix string, workers int, batch int, samples int, minDelay int6
 		data[id].biter = 1
 		data[id].sb.Grow(100)
 	}
-	m := &MetricGenIterator{data: data, minDelay: minDelay, maxDelay: maxDelay}
+	m := &MetricGenIterator{data: data, delay: delay}
 
 	return m, nil
 }

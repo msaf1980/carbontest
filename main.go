@@ -4,7 +4,6 @@ import (
 	"bufio"
 	"errors"
 	"fmt"
-	"log"
 	"os"
 	"sort"
 	"strconv"
@@ -13,33 +12,12 @@ import (
 	"strings"
 	"time"
 
-	"runtime/pprof"
-
 	"github.com/msaf1980/cyclicbarrier"
-	"go.uber.org/ratelimit"
+	"github.com/spf13/cobra"
 
 	"carbontest/pkg/base"
-	"carbontest/pkg/metricgen"
 	"carbontest/pkg/metriclist"
-
-	flag "github.com/spf13/pflag"
 )
-
-var cb *cyclicbarrier.CyclicBarrier
-
-var totalStat = map[base.Proto]map[base.NetOper]map[base.NetErr]int64{}
-var stat = map[base.Proto]map[base.NetOper]map[base.NetErr]int64{}
-var startTimestamp int64
-var endTimestamp int64
-
-// var aggrTime int
-// var aggrTimestamp int64
-
-const aggrHeader = "time\tproto\tconn/s\tconn err/s\tsend/s\tsend err/s\tconn tout/s\tconn reset/s\tconn refused/s\tsend tout/s\tsend reset/s\tsend eof/s\tresolve err/s\tlimit err/s\tbytes/s\n"
-
-//func pintStat(
-
-var running = true
 
 type StringSlice []string
 
@@ -59,45 +37,20 @@ func (u *StringSlice) Type() string {
 	return "[]string"
 }
 
-type config struct {
-	Addr string
-	//Connections int
-	Workers   int // TCP Workers
-	Duration  time.Duration
-	Metrics   int
-	BatchSend int
+var (
+	mainConfig MainConfig
 
-	MetricFiles StringSlice
-	Min         int32
-	Max         int32
-	Incr        int32
+	cb *cyclicbarrier.CyclicBarrier
 
-	Compress base.CompressType
+	totalStat      = map[base.Proto]map[base.NetOper]map[base.NetErr]int64{}
+	stat           = map[base.Proto]map[base.NetOper]map[base.NetErr]int64{}
+	startTimestamp int64
+	endTimestamp   int64
 
-	SendDelayMin time.Duration
-	SendDelayMax time.Duration
-	RateLimiter  ratelimit.Limiter
-
-	ConTimeout  time.Duration
-	SendTimeout time.Duration
-
-	UWorkers   int // UDP Workers
-	UBatchSend int
-
-	MetricPrefix string // Prefix for generated metric name
-	Verbose      bool
-
-	AggrDuration   time.Duration
-	AggrFile       string // write aggregated connections stat to file
-	Graphite       string // address for graphite relay (for send aggregated connections stat)
-	GraphitePrefix string // prefix for graphite metric
-
-	StatFile   string // write connections stat to file
-	DetailFile string // write sended metrics to file
-	CPUProf    string // write cpu profile info to file
-}
-
-const header = "timestamp\tConId\tProto\tType\tStatus\tElapsed\tSize\n"
+	// aggrTime int
+	// aggrTimestamp int64
+	running bool = true
+)
 
 func printStat(start, end time.Time) {
 	// Print stat
@@ -182,501 +135,125 @@ func sendAggrStat(graphite *GraphiteQueue, start, end time.Time, tcpStat, udpSta
 	}
 }
 
-func parseArgs() (config, error) {
-	var (
-		config       config
-		conTimeout   string
-		sendTimeout  string
-		sendDelay    string
-		host         string
-		port         int
-		duration     string
-		err          error
-		compressType string
-		rateLimit    int
-		min          string
-		max          string
-		inc          string
-	)
+func standaloneRun(cmd *cobra.Command, args []string) {
+	var err error
 
-	flag.StringVarP(&host, "host", "r", "127.0.0.1", "hostname")
-	flag.IntVarP(&port, "port", "p", 2003, "port")
-
-	flag.IntVarP(&config.Workers, "workers", "w", 10, "TCP workers")
-	flag.StringVarP(&duration, "duration", "d", "60s", "total test duration")
-	flag.IntVarP(&config.Metrics, "metrics", "m", 1, "metrics sended in one TCP connection")
-	flag.IntVarP(&config.BatchSend, "batch", "b", 1, "metrics count in one TCP send")
-
-	flag.IntVarP(&config.UWorkers, "uworkers", "u", 0, "UDP workers (default 0)")
-	flag.IntVarP(&config.UBatchSend, "ubatch", "B", 1, "metrics count in one UDP send")
-
-	flag.StringVarP(&config.MetricPrefix, "prefix", "P", "test", "metric prefix")
-
-	flag.VarP(&config.MetricFiles, "file", "f", "metrics file (valid: plain text, gz) (format: Name [min[:max[:increment]]")
-	flag.StringVar(&min, "min", "0", "default min value for metrics file")
-	flag.StringVar(&max, "max", "0", "default max value for metrics file")
-	flag.StringVar(&inc, "incr", "0", "default incr value for metrics file (if 0 - value is random, also increase until max, than descrease to min)")
-
-	flag.StringVarP(&conTimeout, "con_timeout", "c", "100ms", "TCP connect timeout (ms)")
-	flag.StringVarP(&sendTimeout, "send_timeout", "s", "500ms", "TCP send timeout (ms)")
-
-	flag.StringVarP(&sendDelay, "delay", "D", "0s", "send delay random range (min[:max])")
-	flag.IntVar(&rateLimit, "rate", 0, "rate limit/s")
-
-	flag.BoolVarP(&config.Verbose, "verbose", "v", false, "verbose")
-
-	flag.DurationVarP(&config.AggrDuration, "aduration", "A", time.Minute, "aggregation duration")
-	flag.StringVarP(&config.AggrFile, "aggr", "a", "", "sended metrics file (appended)")
-	flag.StringVarP(&config.Graphite, "graphite", "g", "", "graphite relay address:port")
-	flag.StringVarP(&config.GraphitePrefix, "gprefix", "G", "test.carbontest", "metric prefix for aggregated stat")
-
-	flag.StringVar(&config.StatFile, "stat", "", "sended metrics stat file (appended)")
-	flag.StringVar(&config.DetailFile, "detail", "", "sended metrics (with value/timestamp) file (appended)")
-
-	flag.StringVar(&config.CPUProf, "cpuprofile", "", "write cpu profile to file")
-
-	flag.StringVar(&compressType, "compress", "", "compress [ gzip | lz4 ]")
-
-	flag.Parse()
-
-	config.Min, err = base.ParseInt32(min, 10)
-	if err != nil {
-		return config, err
-	}
-	config.Max, err = base.ParseInt32(max, 10)
-	if err != nil {
-		return config, err
-	}
-	if config.Max < config.Min {
-		config.Min, config.Max = config.Max, config.Min
-	}
-	config.Incr, err = base.ParseInt32(inc, 10)
-	if err != nil {
-		return config, err
-	}
-	if config.Incr < 0 {
-		config.Incr = -config.Incr
+	if len(args) > 0 {
+		cmd.Help()
+		os.Exit(1)
 	}
 
-	if host == "" {
-		host = "127.0.0.1"
-	}
-	if port < 1 {
-		return config, fmt.Errorf("Invalid port value: %d", port)
-	}
-	if config.Workers < 0 {
-		return config, fmt.Errorf("Invalid TCP workers value: %d", config.Workers)
-	}
-	if config.Metrics < 1 {
-		return config, fmt.Errorf("Invalid metrics value: %d", config.Metrics)
-	}
-	if config.BatchSend < 1 {
-		return config, fmt.Errorf("Invalid TCP metric batchsend value: %d\n", config.BatchSend)
-	}
-	if config.UWorkers < 0 {
-		return config, fmt.Errorf("Invalid UDP workers value: %d", config.Workers)
-	}
-
-	if config.Workers < 0 && config.UWorkers < 0 {
-		return config, fmt.Errorf("Set TCP or UDP workers")
-	}
-
-	splitSendDelay := strings.Split(sendDelay, ":")
-	if len(splitSendDelay) >= 1 {
-		config.SendDelayMin, err = time.ParseDuration(splitSendDelay[0])
-		if err != nil || config.SendDelayMin < 0 {
-			return config, fmt.Errorf("Invalid min delay value: %s", splitSendDelay[0])
-		}
-	}
-	if len(splitSendDelay) == 1 {
-		config.SendDelayMax = config.SendDelayMin
-	} else if len(splitSendDelay) == 2 {
-		config.SendDelayMax, err = time.ParseDuration(splitSendDelay[1])
-		if err != nil || config.SendDelayMax < 0 {
-			return config, fmt.Errorf("Invalid max delay value: %s", splitSendDelay[1])
-		} else if config.SendDelayMin > config.SendDelayMax {
-			return config, fmt.Errorf("Invalid max delay value less than minimal: %s", sendDelay)
-		}
-	} else {
-		return config, fmt.Errorf("Invalid delay value: %s", sendDelay)
-	}
-
-	if rateLimit < 0 {
-		return config, fmt.Errorf("Invalid rate limit value: %d", rateLimit)
-	} else if rateLimit > 0 {
-		if config.SendDelayMax > 0 {
-			return config, fmt.Errorf("delay and rate limit can't be used together")
-		}
-		config.RateLimiter = ratelimit.New(rateLimit)
-	} else {
-		config.RateLimiter = nil
-	}
-
-	config.SendTimeout, err = time.ParseDuration(sendTimeout)
-	if err != nil || config.SendTimeout < 0 {
-		if config.SendTimeout < 1 {
-			return config, fmt.Errorf("Invalid TCP send timeout value: %s", sendTimeout)
-		}
-	}
-	config.ConTimeout, err = time.ParseDuration(conTimeout)
-	if err != nil || config.ConTimeout < 1*time.Microsecond {
-		return config, fmt.Errorf("Invalid TCP connection timeout value: %s", conTimeout)
-	}
-	config.Duration, err = time.ParseDuration(duration)
-	if err != nil || config.Duration < time.Second {
-		return config, fmt.Errorf("Invalid test duration: %s", duration)
-	}
-
-	compressType = strings.ToLower(compressType)
-	if compressType == "" {
-		config.Compress = base.NONE
-	} else if compressType == "gzip" {
-		config.Compress = base.GZIP
-	} else {
-		return config, fmt.Errorf("Invalid compress type: %s", compressType)
-	}
-
-	config.Addr = fmt.Sprintf("%s:%d", host, port)
-
-	if config.AggrDuration < 10*time.Second {
-		return config, fmt.Errorf("Invalid aggregation duration: %v", config.AggrDuration)
-	}
-
-	return config, nil
-}
-
-func main() {
-	argsHead := "### " + strings.Join(os.Args, " ") + "\n"
-	config, err := parseArgs()
-	if err != nil {
+	if err := localPostConfig(&mainConfig.Local); err != nil {
 		fmt.Fprintf(os.Stderr, "%s\n", err.Error())
 		os.Exit(1)
 	}
 
+	workerConfig := mainConfig.Workers["localhost"]
+
+	if len(mainConfig.Shared.MetricFiles) > 0 {
+		workerConfig.MetricsList, err = metriclist.LoadMetricFile(mainConfig.Shared.MetricFiles,
+			mainConfig.Shared.Min, mainConfig.Shared.Max, mainConfig.Shared.Incr)
+		if err != nil {
+			fmt.Fprintf(os.Stderr, "%s\n", err.Error())
+			os.Exit(2)
+		}
+	}
+	if err = worker("localhost", &mainConfig.Local, &mainConfig.Shared, workerConfig); err != nil {
+		fmt.Fprintf(os.Stderr, "%s\n", err.Error())
+		os.Exit(2)
+	}
+}
+
+func globalFlags(cmd *cobra.Command, allConfig *LocalConfig) {
+	cmd.Flags().BoolVarP(&allConfig.Verbose, "verbose", "v", false, "verbose")
+
+	cmd.Flags().DurationVarP(&allConfig.AggrDuration, "aduration", "A", time.Minute, "aggregation duration")
+	cmd.Flags().StringVarP(&allConfig.AggrFile, "aggr", "a", "", "sended metrics file (appended)")
+	cmd.Flags().StringVarP(&allConfig.Graphite, "graphite", "g", "", "graphite relay address:port")
+	cmd.Flags().StringVarP(&allConfig.GraphitePrefix, "gprefix", "G", "test.carbontest", "metric prefix for aggregated stat")
+
+	cmd.Flags().StringVar(&allConfig.StatFile, "stat", "", "sended metrics stat file (appended)")
+	cmd.Flags().StringVar(&allConfig.DetailFile, "detail", "", "sended metrics (with value/timestamp) file (appended)")
+
+	cmd.Flags().StringVar(&allConfig.CPUProf, "cpuprofile", "", "write cpu profile to file")
+
+	cmd.Flags().SortFlags = false
+}
+
+func localPostConfig(config *LocalConfig) error {
 	if len(config.GraphitePrefix) > 0 {
 		hostname, err := os.Hostname()
 		if err != nil {
-			fmt.Fprintf(os.Stderr, "%s\n", err.Error())
-			os.Exit(1)
+			return err
 		}
-		config.GraphitePrefix = config.GraphitePrefix + ".carbontest." + strings.Split(hostname, ".")[0]
+		config.Hostname = strings.Split(hostname, ".")[0]
+		config.GraphitePrefix = config.GraphitePrefix + ".carbontest." + config.Hostname
 	}
 
-	var graphite *GraphiteQueue
-	if len(config.Graphite) > 0 {
-		graphite, err = GraphiteInit(config.Graphite, config.GraphitePrefix, 100, 20)
-		if err != nil {
-			fmt.Fprintf(os.Stderr, "%s\n", err.Error())
-			os.Exit(1)
-		}
-		graphite.Run()
+	return nil
+}
+
+func standaloneFlags() *cobra.Command {
+	cmd := &cobra.Command{
+		Use:   "run",
+		Short: "Run in standalone mode",
+		Run:   standaloneRun,
 	}
 
-	var file *os.File
-	var w *bufio.Writer
+	mainConfig.Workers = make(map[string]*WorkerConfig)
 
-	if config.StatFile != "" {
-		file, err = os.OpenFile(config.StatFile, os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0644)
-		if err != nil {
-			fmt.Fprintf(os.Stderr, "%s\n", err.Error())
-			os.Exit(2)
-		}
-		defer file.Close()
-		w = bufio.NewWriter(file)
-		_, err = w.WriteString(argsHead)
-		if err != nil {
-			fmt.Fprintf(os.Stderr, "%s\n", err.Error())
-			os.Exit(2)
-		}
-		_, err = w.WriteString(header)
-		if err != nil {
-			fmt.Fprintf(os.Stderr, "%s\n", err.Error())
-			os.Exit(2)
-		}
+	globalFlags(cmd, &mainConfig.Local)
+
+	cmd.Flags().SortFlags = false
+
+	cmd.Flags().DurationVarP(&mainConfig.Shared.Duration, "duration", "d", 60*time.Second, "total test duration")
+
+	mainConfig.Workers["localhost"] = &WorkerConfig{}
+
+	// Test endpoint
+	cmd.Flags().StringVarP(&mainConfig.Shared.T.Addr, "host", "r", "127.0.0.1", "address[:port] (default port: 2003)")
+
+	// TCP settings
+	cmd.Flags().IntVarP(&mainConfig.Shared.T.Workers, "workers", "w", 10, "TCP workers")
+	cmd.Flags().IntVarP(&mainConfig.Shared.T.Metrics, "metrics", "m", 1, "metrics sended in one TCP connection")
+	cmd.Flags().IntVarP(&mainConfig.Shared.T.BatchSend, "batch", "b", 1, "metrics count in one TCP send")
+	cmd.Flags().DurationVarP(&mainConfig.Shared.T.ConTimeout, "con_timeout", "c", 100*time.Millisecond, "TCP connect timeout")
+	cmd.Flags().DurationVarP(&mainConfig.Shared.T.SendTimeout, "send_timeout", "s", 500*time.Millisecond, "TCP send timeout")
+
+	// UDP settings
+	cmd.Flags().IntVarP(&mainConfig.Shared.T.UWorkers, "uworkers", "u", 0, "UDP workers (default 0)")
+	cmd.Flags().IntVarP(&mainConfig.Shared.T.UBatchSend, "ubatch", "B", 1, "metrics count in one UDP send")
+
+	// Metrics source
+	// Random metrics
+	cmd.Flags().StringVarP(&mainConfig.Shared.MetricPrefix, "prefix", "P", "test", "metric prefix (for autogenerated metrics)")
+	// Metrics from file
+	cmd.Flags().VarP(&mainConfig.Shared.MetricFiles, "file", "f", "metrics file (valid: plain text, gz) (format: Name [min[:max[:increment]]")
+	// Min/Max/Incr
+	cmd.Flags().Int32Var(&mainConfig.Shared.Min, "min", 0, "default min value for metrics file")
+	cmd.Flags().Int32Var(&mainConfig.Shared.Max, "max", 0, "default max value for metrics file")
+	cmd.Flags().Int32Var(&mainConfig.Shared.Incr, "incr", 0, "default incr value for metrics file (if 0 - value is random, also increase until max, than descrease to min)")
+
+	cmd.Flags().VarP(&mainConfig.Shared.T.SendDelay, "delay", "D", "send delay random range (0s) (min[:max])")
+	cmd.Flags().IntVar(&mainConfig.Shared.T.RateLimit, "rate", 0, "rate limit/s")
+
+	cmd.Flags().StringVar(&mainConfig.Shared.T.Compress, "compress", "", "compress [ none | gzip | lz4 ]")
+
+	return cmd
+}
+
+func main() {
+	var rootCmd = &cobra.Command{
+		Use:   os.Args[0],
+		Short: "carbontest is a carbon load test tool",
 	}
 
-	var dFile *os.File
-	var dw *bufio.Writer
+	var standaloneCmd = standaloneFlags()
 
-	if config.DetailFile != "" {
-		dFile, err = os.OpenFile(config.DetailFile, os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0644)
-		if err != nil {
-			fmt.Fprintf(os.Stderr, "%s\n", err.Error())
-			os.Exit(2)
-		}
-		defer dFile.Close()
-		dw = bufio.NewWriter(dFile)
-		_, err = dw.WriteString(argsHead)
-		if err != nil {
-			fmt.Fprintf(os.Stderr, "%s\n", err.Error())
-			os.Exit(2)
-		}
+	rootCmd.AddCommand(standaloneCmd)
+
+	if err := rootCmd.Execute(); err != nil {
+		fmt.Fprintf(os.Stderr, "%s\n", err.Error())
+		os.Exit(1)
 	}
-
-	var aFile *os.File
-	var aw *bufio.Writer
-
-	if config.AggrFile != "" {
-		aFile, err = os.OpenFile(config.AggrFile, os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0644)
-		if err != nil {
-			fmt.Fprintf(os.Stderr, "%s\n", err.Error())
-			os.Exit(2)
-		}
-		defer aFile.Close()
-		aw = bufio.NewWriter(aFile)
-		_, err = aw.WriteString(argsHead)
-		if err != nil {
-			fmt.Fprintf(os.Stderr, "%s\n", err.Error())
-			os.Exit(2)
-		}
-		_, err = aw.WriteString(aggrHeader)
-		if err != nil {
-			fmt.Fprintf(os.Stderr, "%s\n", err.Error())
-			os.Exit(2)
-		}
-	}
-
-	if config.CPUProf != "" {
-		f, err := os.Create(config.CPUProf)
-		if err != nil {
-			fmt.Fprintf(os.Stderr, "%s\n", err.Error())
-		}
-		_ = pprof.StartCPUProfile(f)
-		defer pprof.StopCPUProfile()
-	}
-
-	cb = cyclicbarrier.New(config.Workers + config.UWorkers + 1)
-
-	result := make(chan ConStat, (config.Workers+config.UWorkers)*1000)
-	mdetail := make(chan string, (config.Workers+config.UWorkers)*10000)
-	workers := config.Workers
-	uworkers := config.UWorkers
-	var titer base.MetricIterator
-	var uiter base.MetricIterator
-
-	if len(config.MetricFiles) > 0 {
-		var metricPing string
-		if len(config.GraphitePrefix) > 0 {
-			metricPing = config.GraphitePrefix + ".ping"
-		}
-		metrics, err := metriclist.LoadMetricFile(config.MetricFiles, config.Min, config.Max, config.Incr, metricPing)
-		if err != nil {
-			fmt.Fprintf(os.Stderr, "%s\n", err.Error())
-			os.Exit(2)
-		}
-		iter, err := metriclist.New(metrics, config.Workers, config.BatchSend, config.Metrics,
-			config.SendDelayMin.Nanoseconds(), config.SendDelayMax.Nanoseconds())
-		if err != nil {
-			fmt.Fprintf(os.Stderr, "%s\n", err.Error())
-			os.Exit(2)
-		}
-		if config.Workers > 0 {
-			titer = iter
-		}
-		if config.UWorkers > 0 {
-			uiter = iter
-		}
-	} else {
-		if config.Workers > 0 {
-			titer, err = metricgen.New(config.MetricPrefix+".tcp", config.Workers, config.BatchSend, config.Metrics,
-				config.SendDelayMin.Nanoseconds(), config.SendDelayMax.Nanoseconds())
-			if err != nil {
-				fmt.Fprintf(os.Stderr, "%s\n", err.Error())
-				os.Exit(2)
-			}
-		}
-		if config.UWorkers > 0 {
-			uiter, err = metricgen.New(config.MetricPrefix+".udp", config.UWorkers, config.BatchSend, config.Metrics,
-				config.SendDelayMin.Nanoseconds(), config.SendDelayMax.Nanoseconds())
-			if err != nil {
-				fmt.Fprintf(os.Stderr, "%s\n", err.Error())
-				os.Exit(2)
-			}
-		}
-	}
-
-	for i := 0; i < config.Workers; i++ {
-		go TcpWorker(i, config, result, mdetail, titer)
-	}
-	for i := 0; i < config.UWorkers; i++ {
-		go UDPWorker(i, config, result, mdetail, uiter)
-	}
-
-	// Test duration
-	go func() {
-		time.Sleep(config.Duration)
-		log.Printf("Shutting down")
-		running = false
-	}()
-
-	start := time.Now()
-
-	log.Printf("Starting TCP workers: %d, UDP %d\n", config.Workers, config.UWorkers)
-	cb.Await()
-
-	begin := time.Now()
-	var end time.Time
-
-	aggrTicker := time.Tick(config.AggrDuration)
-
-	var udpStat Stat
-	var tcpStat Stat
-LOOP:
-	for {
-		select {
-		case r := <-mdetail:
-			_, err = dw.WriteString(r)
-			if err != nil {
-				panic(err)
-			}
-		case <-aggrTicker:
-			end = time.Now()
-			if aw != nil {
-				printAggrStat(aw, begin, end, tcpStat, udpStat, config.Workers, config.UWorkers)
-				aw.Flush()
-			}
-			if graphite != nil {
-				sendAggrStat(graphite, begin, end, tcpStat, udpStat, config.Workers, config.UWorkers)
-			}
-			tcpStat.Clear()
-			udpStat.Clear()
-			begin = end
-		case r := <-result:
-			if r.TimeStamp == 0 {
-				if r.Proto == base.TCP {
-					workers--
-				} else {
-					uworkers--
-				}
-				if workers <= 0 && uworkers <= 0 {
-					break LOOP
-				}
-			} else {
-				if graphite != nil || aw != nil {
-					if r.Proto == base.TCP {
-						tcpStat.Add(&r)
-					} else {
-						udpStat.Add(&r)
-					}
-				}
-
-				sProto, ok := totalStat[r.Proto]
-				if !ok {
-					sProto = map[base.NetOper]map[base.NetErr]int64{}
-					totalStat[r.Proto] = sProto
-				}
-				sOper, ok := sProto[r.Type]
-				if !ok {
-					sOper = map[base.NetErr]int64{}
-					sProto[r.Type] = sOper
-				}
-				sOper[r.Error]++
-
-				// write to stat file
-				if w != nil {
-					timeStr := time.Unix(r.TimeStamp/1000000000, r.TimeStamp%1000000000).Format(time.RFC3339Nano)
-					fmt.Fprintf(w, "%s\t%d\t%s\t%s\t%s\t%d\t%d\n", timeStr, r.Id,
-						r.Proto.String(), r.Type.String(),
-						r.Error.String(), r.Elapsed/1000, r.Size)
-				}
-
-				// if r.TimeStamp+r.Elapsed > endTimestamp {
-				// 	endTimestamp = r.TimeStamp + r.Elapsed
-				// }
-				// if r.TimeStamp < startTimestamp || startTimestamp == 0 {
-				// 	startTimestamp = r.TimeStamp
-				// }
-
-				// if aw != nil {
-				// 	// round to minute
-				// 	endTime := int(endTimestamp / (1000 * 1000 * 1000 * aggrDuration))
-				// 	if endTime > aggrTime {
-				// 		// flush aggregated stat
-				// 		if aggrTime > 0 {
-				// 			if aw != nil {
-				// 				printAggrStat(aw, aggrTimestamp, float64(endTimestamp-aggrTimestamp)/1000000000.0, config.Workers, config.UWorkers)
-				// 			}
-				// 		}
-				// 		aggrTimestamp = endTimestamp
-				// 		aggrTime = endTime
-
-				// 		// merge stat
-				// 		mergeStat(totalStat, stat)
-
-				// 		stat = make(map[base.Proto]map[base.NetOper]map[base.NetErr]int64)
-				// 	}
-				// }
-				// // write to stat file
-				// if w != nil {
-				// 	timeStr := time.Unix(r.TimeStamp/1000000000, r.TimeStamp%1000000000).Format(time.RFC3339Nano)
-				// 	fmt.Fprintf(w, "%s\t%d\t%s\t%s\t%s\t%d\t%d\n", timeStr, r.Id,
-				// 		r.Proto.String(), r.Type.String(),
-				// 		r.Error.String(), r.Elapsed/1000, r.Size)
-				// }
-
-				// sProto, ok := stat[r.Proto]
-				// if !ok {
-				// 	sProto = map[base.NetOper]map[base.NetErr]int64{}
-				// 	stat[r.Proto] = sProto
-				// }
-				// sOper, ok := sProto[r.Type]
-				// if !ok {
-				// 	sOper = map[base.NetErr]int64{}
-				// 	sProto[r.Type] = sOper
-				// }
-				// _, ok = sOper[r.Error]
-				// if !ok {
-				// 	sOper[r.Error] = 1
-				// } else {
-				// 	sOper[r.Error]++
-				// }
-			}
-		}
-	}
-	end = time.Now()
-	duration := end.Sub(start)
-	log.Printf("Shutdown. Test Duration %s", duration)
-	if config.AggrFile != "" {
-		fmt.Printf("aggregated results writed to %s\n", config.AggrFile)
-	}
-	if config.StatFile != "" {
-		fmt.Printf("results writed to %s\n", config.StatFile)
-	}
-	if config.DetailFile != "" {
-		fmt.Printf("sended metrics writed to %s\n", config.DetailFile)
-	}
-	if aw != nil {
-		printAggrStat(aw, begin, end, tcpStat, udpStat, config.Workers, config.UWorkers)
-	}
-
-	printStat(start, end)
-
-	if w != nil {
-		err = w.Flush()
-		if err != nil {
-			panic(err)
-		}
-	}
-	if dw != nil {
-		for len(mdetail) > 0 {
-			r := <-mdetail
-			_, err = dw.WriteString(r)
-			if err != nil {
-				panic(err)
-			}
-		}
-		err = dw.Flush()
-		if err != nil {
-			panic(err)
-		}
-	}
-	if aw != nil {
-		err = aw.Flush()
-		if err != nil {
-			panic(err)
-		}
-	}
-
-	time.Sleep(2 * time.Second)
-	graphite.Stop()
 }

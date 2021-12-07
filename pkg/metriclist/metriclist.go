@@ -10,6 +10,7 @@ import (
 	"strconv"
 	"strings"
 	"sync/atomic"
+	"time"
 
 	stringutils "github.com/msaf1980/go-stringutils"
 )
@@ -23,20 +24,21 @@ type record struct {
 	sb        stringutils.Builder // metric buffer
 }
 
-type metric struct {
-	name string
-	min  int32
-	max  int32
-	incr int32 // increment for ITERATE
+type Metric struct {
+	Name string
+	Min  int32
+	Max  int32
+	Incr int32 // increment for ITERATE
+
 	last int32 // last value for ITERATE
 }
 
 type MetricListIterator struct {
-	data     []record // workers state
-	minDelay int64
-	maxDelay int64
+	data []record // workers state
 
-	metrics []metric // metrics
+	delay base.RandomDuration
+
+	metrics []Metric // metrics
 	n       uint64   // metric position
 }
 
@@ -45,20 +47,20 @@ func (m *MetricListIterator) Reset(worker int) {
 	m.data[worker].biter = 1
 }
 
-func (m *MetricListIterator) Value(v *metric) int32 {
-	if v.min == v.max {
-		return v.min
-	} else if v.incr > 0 {
+func (m *MetricListIterator) Value(v *Metric) int32 {
+	if v.Min == v.Max {
+		return v.Min
+	} else if v.Incr > 0 {
 		n := atomic.LoadInt32(&v.last)
-		if n > v.max || n < v.min {
-			atomic.StoreInt32(&v.last, v.min)
-			return v.min
+		if n > v.Max || n < v.Min {
+			atomic.StoreInt32(&v.last, v.Min)
+			return v.Min
 		} else {
-			atomic.StoreInt32(&v.last, n+v.incr)
+			atomic.StoreInt32(&v.last, n+v.Incr)
 			return n
 		}
 	} else {
-		return base.RandomValue(v.min, v.max)
+		return base.RandomIn32(v.Min, v.Max)
 	}
 }
 
@@ -79,13 +81,13 @@ func (m *MetricListIterator) Next(worker int, timestamp int64) base.Event {
 				n--
 			}
 
-			var delay int64
+			var delay time.Duration
 			action := base.SEND
 			m.data[worker].iteration++
 			if m.data[worker].biter >= m.data[worker].batch {
 				m.data[worker].biter = 1
 				action = base.FLUSH
-				delay = base.RandomDuration(m.minDelay, m.maxDelay)
+				delay = m.delay.Random()
 			} else {
 				m.data[worker].biter++
 			}
@@ -93,7 +95,7 @@ func (m *MetricListIterator) Next(worker int, timestamp int64) base.Event {
 			v := m.Value(&m.metrics[n])
 
 			m.data[worker].sb.Reset()
-			m.data[worker].sb.WriteString(m.metrics[n].name)
+			m.data[worker].sb.WriteString(m.metrics[n].Name)
 			m.data[worker].sb.WriteString(" ")
 			m.data[worker].sb.WriteString(strconv.FormatInt(int64(v), 10))
 			m.data[worker].sb.WriteString(" ")
@@ -111,8 +113,7 @@ func (m *MetricListIterator) Next(worker int, timestamp int64) base.Event {
 	}
 }
 
-func New(metrics []metric, workers int, batch int, samples int,
-	minDelay, maxDelay int64) (*MetricListIterator, error) {
+func New(metrics []Metric, workers int, batch int, samples int, delay base.RandomDuration) (*MetricListIterator, error) {
 	if len(metrics) == 0 {
 		return nil, fmt.Errorf("metrics is empty")
 	}
@@ -129,15 +130,12 @@ func New(metrics []metric, workers int, batch int, samples int,
 		data[id].batch = batch
 		data[id].biter = 1
 	}
-	m := &MetricListIterator{
-		data: data, minDelay: minDelay, maxDelay: maxDelay,
-		metrics: metrics,
-	}
+	m := &MetricListIterator{data: data, delay: delay, metrics: metrics}
 
 	return m, nil
 }
 
-func LoadMetricFile(filenames []string, valueMin, valueMax, valueInc int32, metricPing string) ([]metric, error) {
+func LoadMetricFile(filenames []string, valueMin, valueMax, valueInc int32) ([]Metric, error) {
 	var (
 		file *os.File
 		err  error
@@ -149,7 +147,7 @@ func LoadMetricFile(filenames []string, valueMin, valueMax, valueInc int32, metr
 		}
 	}()
 
-	metrics := make([]metric, 0, 1024)
+	metrics := make([]Metric, 0, 1024)
 	for _, filename := range filenames {
 		file, err = os.Open(filename)
 		if err != nil {
@@ -178,40 +176,40 @@ func LoadMetricFile(filenames []string, valueMin, valueMax, valueInc int32, metr
 			}
 			//fmt.Printf("%s \n", line)
 			v, n := stringutils.SplitN(strings.TrimRight(line, "\n"), " ", buf)
-			m := metric{name: v[0]}
+			m := Metric{Name: v[0]}
 			if len(v) > 2 {
 				return metrics, fmt.Errorf("filename %s: %d line incorrect", filename, n)
 			}
 			if len(v) == 1 {
-				m.min = valueMin
-				m.max = valueMax
-				m.incr = valueInc
+				m.Min = valueMin
+				m.Max = valueMax
+				m.Incr = valueInc
 			} else if len(v) == 2 {
 				vv, n := stringutils.SplitN(v[1], ":", buf)
 				if len(v) > 3 {
 					return metrics, fmt.Errorf("filename %s: %d line values field incorrect", filename, n)
 				}
-				m.min, err = base.ParseInt32(vv[0], 10)
+				m.Min, err = base.ParseInt32(vv[0], 10)
 				if err != nil {
 					return metrics, fmt.Errorf("filename %s: %d line min value field incorrect", filename, n)
 				}
 				if len(vv) == 1 {
-					m.max = m.min
+					m.Max = m.Min
 				}
 				if len(vv) >= 2 {
-					m.max, err = base.ParseInt32(vv[1], 10)
+					m.Max, err = base.ParseInt32(vv[1], 10)
 					if err != nil {
 						return metrics, fmt.Errorf("filename %s: %d line max value field incorrect", filename, n)
 					}
 					if len(vv) == 3 {
-						m.incr, err = base.ParseInt32(vv[2], 10)
+						m.Incr, err = base.ParseInt32(vv[2], 10)
 						if err != nil {
 							return metrics, fmt.Errorf("filename %s: %d line increment value field incorrect", filename, n)
 						}
 					}
 				}
 			}
-			m.last = m.min
+			m.last = m.Min
 			metrics = append(metrics, m)
 		}
 		if err != nil {
@@ -222,10 +220,6 @@ func LoadMetricFile(filenames []string, valueMin, valueMax, valueInc int32, metr
 		}
 		file.Close()
 		file = nil
-	}
-
-	if len(metricPing) > 0 {
-		metrics = append(metrics, metric{name: metricPing, min: 1, max: 1})
 	}
 
 	return metrics, nil
