@@ -4,9 +4,13 @@ import (
 	"bufio"
 	"errors"
 	"fmt"
+	"log"
 	"os"
+	"os/signal"
 	"sort"
 	"strconv"
+	"sync/atomic"
+	"syscall"
 
 	//"strconv"
 	"strings"
@@ -49,8 +53,21 @@ var (
 
 	// aggrTime int
 	// aggrTimestamp int64
-	running bool = true
+	running int32 = 1
 )
+
+func sigHandler() {
+	c := make(chan os.Signal, 1)
+	signal.Notify(c, syscall.SIGINT, syscall.SIGTERM, syscall.SIGHUP)
+
+	signal := <-c
+	log.Printf("Signal %s recieved", signal.String())
+
+	switch signal {
+	case syscall.SIGINT, syscall.SIGTERM, syscall.SIGHUP:
+		atomic.StoreInt32(&running, 0)
+	}
+}
 
 func printStat(start, end time.Time) {
 	// Print stat
@@ -252,8 +269,10 @@ func main() {
 
 	rootCmd.AddCommand(standaloneCmd)
 
+	go sigHandler()
+
 	if err := rootCmd.Execute(); err != nil {
-		fmt.Fprintf(os.Stderr, "%s\n", err.Error())
+		log.Printf("%s\n", err.Error())
 		os.Exit(1)
 	}
 }

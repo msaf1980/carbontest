@@ -10,6 +10,7 @@ import (
 	"os"
 	"runtime/pprof"
 	"strings"
+	"sync/atomic"
 	"time"
 
 	"github.com/msaf1980/cyclicbarrier"
@@ -174,12 +175,13 @@ func worker(name string, localConfig *LocalConfig, sharedConfig *SharedConfig, w
 	go func() {
 		time.Sleep(sharedConfig.Duration)
 		log.Printf("Shutting down")
-		running = false
+		atomic.StoreInt32(&running, 0)
 	}()
 
 	start := time.Now()
 
 	log.Printf("Starting TCP workers: %d, UDP %d\n", workerConfig.T.Workers, workerConfig.T.UWorkers)
+
 	cb.Await()
 
 	begin := time.Now()

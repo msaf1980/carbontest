@@ -4,6 +4,7 @@ import (
 	"io"
 	"log"
 	"net"
+	"sync/atomic"
 	"time"
 
 	"carbontest/pkg/base"
@@ -41,7 +42,7 @@ func TcpWorker(id int, localConfig *LocalConfig, sharedConfig *SharedConfig, wor
 	var con net.Conn
 	var w io.Writer
 	var err error
-	for running {
+	for atomic.LoadInt32(&running) == 1 {
 		//r.ResultZero()
 		//var end time.Time
 		start := time.Now()
@@ -124,7 +125,7 @@ func UDPWorker(id int, localConfig *LocalConfig, sharedConfig *SharedConfig, wor
 	var con net.Conn
 	var w io.Writer
 	var err error
-	for running {
+	for atomic.LoadInt32(&running) == 1 {
 		start := time.Now()
 		e := iter.Next(id, start.Unix())
 		if e.Action == base.CLOSE {
