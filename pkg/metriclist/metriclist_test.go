@@ -49,7 +49,7 @@ func TestMetricListIterator_Next(t *testing.T) {
 	if err != nil {
 		t.Error(err)
 	}
-	it, err := New(metrics, workers, 2, 4, base.RandomDuration{Min: 0, Max: 0})
+	it, err := New(metrics, workers, 2, 4, 0, 0, 0, base.RandomDuration{Min: 0, Max: 0})
 	if err != nil {
 		t.Error(err)
 	}

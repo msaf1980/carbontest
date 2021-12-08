@@ -1,7 +1,6 @@
 package main
 
 import (
-	"io"
 	"log"
 	"net"
 	"sync/atomic"
@@ -40,7 +39,7 @@ func TcpWorker(id int, localConfig *LocalConfig, sharedConfig *SharedConfig, wor
 
 	var count int64
 	var con net.Conn
-	var w io.Writer
+	var w BufferedWriter
 	var err error
 	for atomic.LoadInt32(&running) == 1 {
 		//r.ResultZero()
@@ -49,7 +48,7 @@ func TcpWorker(id int, localConfig *LocalConfig, sharedConfig *SharedConfig, wor
 		e := iter.Next(id, start.Unix())
 		if e.Action == base.CLOSE {
 			if con != nil {
-				err = flushWriter(w, workerConfig.CompressType)
+				err = w.Flush()
 				if err == nil {
 					err = con.Close()
 				} else {
@@ -59,7 +58,7 @@ func TcpWorker(id int, localConfig *LocalConfig, sharedConfig *SharedConfig, wor
 				w = nil
 			}
 		} else if con == nil && (e.Action == base.SEND || e.Action == base.FLUSH) {
-			con, w, err = connectWriter("tcp", workerConfig.T.Addr, workerConfig.T.ConTimeout, workerConfig.CompressType)
+			con, w, err = connectWriter("tcp", workerConfig.T.Address, workerConfig.T.ConTimeout, workerConfig.CompressType)
 			r.Elapsed = time.Since(start).Nanoseconds()
 			r.Type = base.CONNECT
 			r.Error = base.NetError(err)
@@ -74,7 +73,7 @@ func TcpWorker(id int, localConfig *LocalConfig, sharedConfig *SharedConfig, wor
 				//r.Size, err = fmt.Fprint(w, e.Send)
 				r.Size, err = w.Write([]byte(e.Send))
 				if err == nil && e.Action == base.FLUSH {
-					err = flushWriter(w, workerConfig.CompressType)
+					err = w.Flush()
 				}
 				if err == nil {
 					count++
@@ -123,21 +122,21 @@ func UDPWorker(id int, localConfig *LocalConfig, sharedConfig *SharedConfig, wor
 
 	var count int64
 	var con net.Conn
-	var w io.Writer
+	var w BufferedWriter
 	var err error
 	for atomic.LoadInt32(&running) == 1 {
 		start := time.Now()
 		e := iter.Next(id, start.Unix())
 		if e.Action == base.CLOSE {
 			if con != nil {
-				err = flushWriter(w, workerConfig.CompressType)
+				err = w.Flush()
 				con.Close()
 				w = nil
 				con = nil
 			}
 		} else if con == nil && (e.Action == base.SEND || e.Action == base.FLUSH) {
 			start = time.Now()
-			con, w, err = connectWriter("udp", workerConfig.T.Addr, workerConfig.T.ConTimeout, workerConfig.CompressType)
+			con, w, err = connectWriter("udp", workerConfig.T.Address, workerConfig.T.ConTimeout, workerConfig.CompressType)
 			r.Elapsed = time.Since(start).Nanoseconds()
 			r.Type = base.CONNECT
 			r.Error = base.NetError(err)
@@ -151,7 +150,7 @@ func UDPWorker(id int, localConfig *LocalConfig, sharedConfig *SharedConfig, wor
 			//sended, err := fmt.Fprint(w, e.Send)
 			sended, err := w.Write([]byte(e.Send))
 			if err == nil && e.Action == base.FLUSH {
-				err = flushWriter(w, workerConfig.CompressType)
+				err = w.Flush()
 			}
 			r.Error = base.NetError(err)
 			r.Size = sended

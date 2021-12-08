@@ -4,6 +4,7 @@ import (
 	"bufio"
 	"carbontest/pkg/base"
 	"compress/gzip"
+	"errors"
 	"fmt"
 	"io"
 	"os"
@@ -14,6 +15,8 @@ import (
 
 	stringutils "github.com/msaf1980/go-stringutils"
 )
+
+var ErrEmpty = errors.New("metric list is empty")
 
 type record struct {
 	biter     int // batch iteration
@@ -113,21 +116,32 @@ func (m *MetricListIterator) Next(worker int, timestamp int64) base.Event {
 	}
 }
 
-func New(metrics []Metric, workers int, batch int, samples int, delay base.RandomDuration) (*MetricListIterator, error) {
+func New(metrics []Metric, workers int, batch int, samples int, uworkers int, ubatch int, usamples int, delay base.RandomDuration) (*MetricListIterator, error) {
 	if len(metrics) == 0 {
 		return nil, fmt.Errorf("metrics is empty")
 	}
 
-	data := make([]record, workers)
+	data := make([]record, workers+uworkers)
 	if batch < 0 {
 		batch = 1
 	}
 	if samples < batch {
 		samples = batch
 	}
-	for id := range data {
+	if ubatch < 0 {
+		ubatch = 1
+	}
+	if usamples < ubatch {
+		usamples = ubatch
+	}
+	for id := 0; id < workers; id++ {
 		data[id].samples = samples
 		data[id].batch = batch
+		data[id].biter = 1
+	}
+	for id := workers; id < len(data); id++ {
+		data[id].samples = usamples
+		data[id].batch = ubatch
 		data[id].biter = 1
 	}
 	m := &MetricListIterator{data: data, delay: delay, metrics: metrics}
@@ -175,7 +189,7 @@ func LoadMetricFile(filenames []string, valueMin, valueMax, valueInc int32) ([]M
 				break
 			}
 			//fmt.Printf("%s \n", line)
-			v, n := stringutils.SplitN(strings.TrimRight(line, "\n"), " ", buf)
+			v := stringutils.SplitN(strings.TrimRight(line, "\n"), " ", buf)
 			m := Metric{Name: v[0]}
 			if len(v) > 2 {
 				return metrics, fmt.Errorf("filename %s: %d line incorrect", filename, n)
@@ -185,7 +199,7 @@ func LoadMetricFile(filenames []string, valueMin, valueMax, valueInc int32) ([]M
 				m.Max = valueMax
 				m.Incr = valueInc
 			} else if len(v) == 2 {
-				vv, n := stringutils.SplitN(v[1], ":", buf)
+				vv := stringutils.SplitN(v[1], ":", buf)
 				if len(v) > 3 {
 					return metrics, fmt.Errorf("filename %s: %d line values field incorrect", filename, n)
 				}
@@ -220,6 +234,10 @@ func LoadMetricFile(filenames []string, valueMin, valueMax, valueInc int32) ([]M
 		}
 		file.Close()
 		file = nil
+	}
+
+	if len(metrics) == 0 {
+		return metrics, ErrEmpty
 	}
 
 	return metrics, nil

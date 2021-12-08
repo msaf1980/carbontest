@@ -9,6 +9,17 @@ import (
 	"time"
 )
 
+type BufferedWriter interface {
+	io.Writer
+
+	Flush() error
+}
+
+type BufferedStringWriter interface {
+	BufferedWriter
+	io.StringWriter
+}
+
 // ConStat connection or send statistic
 type ConStat struct {
 	Id        int
@@ -35,24 +46,16 @@ func (r *ConStat) ConStatZero() {
 	r.Error = base.OK
 }
 
-func connectWriter(proto string, addr string, conTimeout time.Duration, c base.CompressType) (net.Conn, io.Writer, error) {
+func connectWriter(proto string, addr string, conTimeout time.Duration, c base.CompressType) (net.Conn, BufferedWriter, error) {
 	con, err := net.DialTimeout(proto, addr, conTimeout)
 	if err != nil {
 		return nil, nil, err
 	}
-	var w io.Writer
+	var w BufferedWriter
 	if c == base.GZIP {
 		w, err = gzip.NewWriterLevel(con, gzip.DefaultCompression)
 	} else {
 		w = bufio.NewWriter(con)
 	}
 	return con, w, err
-}
-
-func flushWriter(w io.Writer, c base.CompressType) error {
-	if c == base.GZIP {
-		return w.(*gzip.Writer).Flush()
-	} else {
-		return w.(*bufio.Writer).Flush()
-	}
 }

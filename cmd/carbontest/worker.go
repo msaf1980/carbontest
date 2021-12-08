@@ -26,6 +26,9 @@ func worker(name string, localConfig *LocalConfig, sharedConfig *SharedConfig, w
 		graphite *GraphiteQueue
 	)
 
+	mutex.Lock()
+	defer mutex.Unlock()
+
 	if sharedConfig.Max < sharedConfig.Min {
 		sharedConfig.Min, sharedConfig.Max = sharedConfig.Max, sharedConfig.Min
 	}
@@ -121,54 +124,58 @@ func worker(name string, localConfig *LocalConfig, sharedConfig *SharedConfig, w
 		defer pprof.StopCPUProfile()
 	}
 
-	cb = cyclicbarrier.New(workerConfig.T.Workers + workerConfig.T.UWorkers + 1)
+	cb = cyclicbarrier.New(workerConfig.T.TCP.Workers + workerConfig.T.UDP.Workers + 1)
 
-	result := make(chan ConStat, (workerConfig.T.Workers+workerConfig.T.UWorkers)*1000)
-	mdetail := make(chan string, (workerConfig.T.Workers+workerConfig.T.UWorkers)*10000)
-	workers := workerConfig.T.Workers
-	uworkers := workerConfig.T.UWorkers
+	result := make(chan ConStat, (workerConfig.T.TCP.Workers+workerConfig.T.UDP.Workers)*1000)
+	mdetail := make(chan string, (workerConfig.T.TCP.Workers+workerConfig.T.UDP.Workers)*10000)
+
 	var titer base.MetricIterator
 	var uiter base.MetricIterator
 
-	if len(workerConfig.MetricsList) > 0 {
+	var udpOffset int
+
+	if len(mainConfig.Local.MetricsList) > 0 {
 		if len(localConfig.GraphitePrefix) > 0 {
 			metricPing := localConfig.GraphitePrefix + ".ping"
-			workerConfig.MetricsList = append(workerConfig.MetricsList, metriclist.Metric{Name: metricPing, Min: 1, Max: 1})
+			mainConfig.Local.MetricsList = append(mainConfig.Local.MetricsList, metriclist.Metric{Name: metricPing, Min: 1, Max: 1})
 		}
-
-		iter, err := metriclist.New(workerConfig.MetricsList, workerConfig.T.Workers, workerConfig.T.BatchSend, workerConfig.T.Metrics,
+		iter, err := metriclist.New(mainConfig.Local.MetricsList,
+			workerConfig.T.TCP.Workers, workerConfig.T.TCP.BatchSend, workerConfig.T.TCP.Metrics,
+			workerConfig.T.UDP.Workers, workerConfig.T.UDP.BatchSend, workerConfig.T.UDP.Metrics,
 			workerConfig.T.SendDelay)
 		if err != nil {
 			return err
 		}
-		if workerConfig.T.Workers > 0 {
+
+		if workerConfig.T.TCP.Workers > 0 {
+			udpOffset = workerConfig.T.TCP.Workers
 			titer = iter
 		}
-		if workerConfig.T.UWorkers > 0 {
+		if workerConfig.T.UDP.Workers > 0 {
 			uiter = iter
 		}
 	} else {
-		if workerConfig.T.Workers > 0 {
-			titer, err = metricgen.New(sharedConfig.MetricPrefix+"."+localConfig.Hostname+".tcp", workerConfig.T.Workers,
-				workerConfig.T.BatchSend, workerConfig.T.Metrics, workerConfig.T.SendDelay)
+		if workerConfig.T.TCP.Workers > 0 {
+			titer, err = metricgen.New(sharedConfig.MetricPrefix+"."+localConfig.Hostname+".tcp", workerConfig.T.TCP.Workers,
+				workerConfig.T.TCP.BatchSend, workerConfig.T.TCP.Metrics, workerConfig.T.SendDelay)
 			if err != nil {
 				return err
 			}
 		}
-		if workerConfig.T.UWorkers > 0 {
-			uiter, err = metricgen.New(sharedConfig.MetricPrefix+"."+localConfig.Hostname+".udp", workerConfig.T.UWorkers,
-				workerConfig.T.BatchSend, workerConfig.T.Metrics, workerConfig.T.SendDelay)
+		if workerConfig.T.UDP.Workers > 0 {
+			uiter, err = metricgen.New(sharedConfig.MetricPrefix+"."+localConfig.Hostname+".udp", workerConfig.T.UDP.Workers,
+				workerConfig.T.UDP.BatchSend, workerConfig.T.UDP.Metrics, workerConfig.T.SendDelay)
 			if err != nil {
 				return err
 			}
 		}
 	}
 
-	for i := 0; i < workerConfig.T.Workers; i++ {
+	for i := 0; i < workerConfig.T.TCP.Workers; i++ {
 		go TcpWorker(i, localConfig, sharedConfig, workerConfig, result, mdetail, titer)
 	}
-	for i := 0; i < workerConfig.T.UWorkers; i++ {
-		go UDPWorker(i, localConfig, sharedConfig, workerConfig, result, mdetail, uiter)
+	for i := 0; i < workerConfig.T.UDP.Workers; i++ {
+		go UDPWorker(udpOffset+i, localConfig, sharedConfig, workerConfig, result, mdetail, uiter)
 	}
 
 	// Test duration
@@ -180,7 +187,7 @@ func worker(name string, localConfig *LocalConfig, sharedConfig *SharedConfig, w
 
 	start := time.Now()
 
-	log.Printf("Starting TCP workers: %d, UDP %d\n", workerConfig.T.Workers, workerConfig.T.UWorkers)
+	log.Printf("Starting TCP workers: %d, UDP %d\n", workerConfig.T.TCP.Workers, workerConfig.T.UDP.Workers)
 
 	cb.Await()
 
@@ -191,6 +198,8 @@ func worker(name string, localConfig *LocalConfig, sharedConfig *SharedConfig, w
 
 	var udpStat Stat
 	var tcpStat Stat
+	workers := workerConfig.T.TCP.Workers
+	uworkers := workerConfig.T.UDP.Workers
 LOOP:
 	for {
 		select {
@@ -202,11 +211,11 @@ LOOP:
 		case <-aggrTicker:
 			end = time.Now()
 			if aw != nil {
-				printAggrStat(aw, begin, end, tcpStat, udpStat, workerConfig.T.Workers, workerConfig.T.UWorkers)
+				printAggrStat(aw, begin, end, tcpStat, udpStat, workerConfig.T.TCP.Workers, workerConfig.T.UDP.Workers)
 				aw.Flush()
 			}
 			if graphite != nil {
-				sendAggrStat(graphite, begin, end, tcpStat, udpStat, workerConfig.T.Workers, workerConfig.T.UWorkers)
+				sendAggrStat(graphite, begin, end, tcpStat, udpStat, workerConfig.T.TCP.Workers, workerConfig.T.UDP.Workers)
 			}
 			tcpStat.Clear()
 			udpStat.Clear()
@@ -316,7 +325,7 @@ LOOP:
 		fmt.Printf("sended metrics writed to %s\n", localConfig.DetailFile)
 	}
 	if aw != nil {
-		printAggrStat(aw, begin, end, tcpStat, udpStat, workerConfig.T.Workers, workerConfig.T.UWorkers)
+		printAggrStat(aw, begin, end, tcpStat, udpStat, workerConfig.T.TCP.Workers, workerConfig.T.UDP.Workers)
 	}
 
 	printStat(start, end)

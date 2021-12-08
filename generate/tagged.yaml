@@ -1,0 +1,27 @@
+sub:
+  "ENV":
+    type: "list"
+    value: [ "cloud", "production", "dev" ]
+    sub:
+      "TEAM":
+        type: "list"
+        value: [ "SalesLT", "BackLT", "FrontLT", "MetricLT", "MLLT", "DTLT" ]
+        sitems: 100
+        sub:
+          "HOST":
+            type: "list_rand_str"
+            value:
+              min: 10
+              max: 20
+            sitems: 120
+            sub:
+              "PID":
+                type: "list_rand_int"
+                value:
+                  min: 1
+                  max: 65535
+              "PROCESS":
+                type: "list_rand_str"
+                value:
+                  min: 10
+                  max: 20
