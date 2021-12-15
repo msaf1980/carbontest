@@ -1,6 +1,7 @@
 package main
 
 import (
+	"io"
 	"log"
 	"net"
 	"sync/atomic"
@@ -50,7 +51,11 @@ func TcpWorker(id int, localConfig *LocalConfig, sharedConfig *SharedConfig, wor
 		e := iter.Next(id, start.Unix())
 		if e.Action == base.CLOSE {
 			if con != nil {
-				err = w.Flush()
+				if closer, ok := w.(io.Closer); ok {
+					err = closer.Close()
+				} else {
+					err = w.Flush()
+				}
 				if err == nil {
 					err = con.Close()
 				} else {
@@ -97,6 +102,11 @@ func TcpWorker(id int, localConfig *LocalConfig, sharedConfig *SharedConfig, wor
 				log.Print(err)
 			}
 			if con != nil {
+				if closer, ok := w.(io.Closer); ok {
+					closer.Close()
+				} else {
+					w.Flush()
+				}
 				con.Close()
 				w = nil
 				con = nil
@@ -131,7 +141,11 @@ func UDPWorker(id int, localConfig *LocalConfig, sharedConfig *SharedConfig, wor
 		e := iter.Next(id, start.Unix())
 		if e.Action == base.CLOSE {
 			if con != nil {
-				err = w.Flush()
+				if closer, ok := w.(io.Closer); ok {
+					closer.Close()
+				} else {
+					w.Flush()
+				}
 				con.Close()
 				w = nil
 				con = nil
@@ -176,6 +190,9 @@ func UDPWorker(id int, localConfig *LocalConfig, sharedConfig *SharedConfig, wor
 		out <- *r
 	}
 	if con != nil {
+		if closer, ok := w.(io.Closer); ok {
+			closer.Close()
+		}
 		con.Close()
 	}
 	if localConfig.Verbose {

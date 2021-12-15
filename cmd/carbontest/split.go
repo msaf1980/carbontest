@@ -5,6 +5,7 @@ import (
 	"carbontest/pkg/base"
 	"compress/gzip"
 	"fmt"
+	"io"
 	"log"
 	"os"
 	"path"
@@ -134,7 +135,12 @@ func splitFile(fileName, suffix string, nodes int, policy SplitPolicy, overwrite
 	}
 
 	for i := 0; i < nodes; i++ {
-		if err = writers[i].Flush(); err != nil {
+		if closer, ok := writers[i].(io.Closer); ok {
+			err = closer.Close()
+		} else {
+			err = writers[i].Flush()
+		}
+		if err != nil {
 			return fmt.Errorf("%v for %s", err, fileNames[n])
 		}
 		log.Printf("%s written", fileNames[n])

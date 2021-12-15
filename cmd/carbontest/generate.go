@@ -380,7 +380,12 @@ func generateRun(cmd *cobra.Command, args []string) {
 
 	errs := writeValues(w, templates, &sv)
 
-	if err = w.Flush(); err != nil {
+	if closer, ok := w.(io.Closer); ok {
+		err = closer.Close()
+	} else {
+		err = w.Flush()
+	}
+	if err != nil {
 		log.Fatal(err)
 	}
 
