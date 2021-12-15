@@ -7,6 +7,8 @@ import (
 	"time"
 
 	"carbontest/pkg/base"
+
+	"github.com/msaf1980/go-stringutils"
 )
 
 func delay(config *WorkerConfig, delay time.Duration, action base.NetOper) time.Time {
@@ -71,7 +73,7 @@ func TcpWorker(id int, localConfig *LocalConfig, sharedConfig *SharedConfig, wor
 			err = con.SetDeadline(start.Add(workerConfig.T.SendTimeout))
 			if err == nil {
 				//r.Size, err = fmt.Fprint(w, e.Send)
-				r.Size, err = w.Write([]byte(e.Send))
+				r.Size, err = w.Write(stringutils.UnsafeStringBytes(&e.Send))
 				if err == nil && e.Action == base.FLUSH {
 					err = w.Flush()
 				}
@@ -148,7 +150,7 @@ func UDPWorker(id int, localConfig *LocalConfig, sharedConfig *SharedConfig, wor
 		if err == nil && (e.Action == base.SEND || e.Action == base.FLUSH) {
 			start = time.Now()
 			//sended, err := fmt.Fprint(w, e.Send)
-			sended, err := w.Write([]byte(e.Send))
+			sended, err := w.Write(stringutils.UnsafeStringBytes(&e.Send))
 			if err == nil && e.Action == base.FLUSH {
 				err = w.Flush()
 			}
