@@ -6,7 +6,7 @@ require (
 	github.com/julienschmidt/httprouter v1.3.0
 	github.com/msaf1980/cyclicbarrier v1.0.0
 	github.com/msaf1980/go-lockfree-queue v0.0.0-20200822061714-35c92fde4d45
-	github.com/msaf1980/go-stringutils v0.0.13
+	github.com/msaf1980/go-stringutils v0.0.15
 	github.com/msaf1980/graphite-golang v0.0.0-20200825115628-d67eaf9b8158
 	github.com/spf13/cobra v1.2.1
 	github.com/spf13/pflag v1.0.5

@@ -53,7 +53,7 @@ func connectWriter(proto string, addr string, conTimeout time.Duration, c base.C
 	}
 	var w BufferedWriter
 	if c == base.GZIP {
-		w, err = gzip.NewWriterLevel(con, gzip.DefaultCompression)
+		w = gzip.NewWriter(con)
 	} else {
 		w = bufio.NewWriter(con)
 	}

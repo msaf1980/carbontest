@@ -128,7 +128,7 @@ func splitFile(fileName, suffix string, nodes int, policy SplitPolicy, overwrite
 			n = (n + 1) % nodes
 		}
 
-		if _, err = writers[n].Write(stringutils.UnsafeStringBytes(&line)); err != nil {
+		if _, err = stringutils.WriteString(writers[n], line); err != nil {
 			return fmt.Errorf("%v for %s", err, fileNames[n])
 		}
 	}

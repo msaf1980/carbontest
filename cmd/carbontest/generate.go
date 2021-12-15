@@ -236,11 +236,11 @@ func generateValuesTemplate(c map[string]*SubItem, sitems int, sv *valuesTemplat
 	return nil
 }
 
-func writeValue(w io.StringWriter, template string, sv *valuesTemplate) error {
+func writeValue(w BufferedWriter, template string, sv *valuesTemplate) error {
 	if !strings.Contains(template, "{{") {
-		w.WriteString(template)
+		io.WriteString(w, template)
 		if !strings.HasSuffix(template, "\n") {
-			w.WriteString("\n")
+			io.WriteString(w, "\n")
 		}
 		return nil // end of template expand
 	}
@@ -269,9 +269,9 @@ func writeValue(w io.StringWriter, template string, sv *valuesTemplate) error {
 				return err
 			}
 		} else {
-			w.WriteString(t)
+			io.WriteString(w, t)
 			if !strings.HasSuffix(t, "\n") {
-				w.WriteString("\n")
+				io.WriteString(w, "\n")
 			}
 		}
 	}
@@ -282,7 +282,7 @@ func writeValue(w io.StringWriter, template string, sv *valuesTemplate) error {
 var reStart = regexp.MustCompile(`{{ +`)
 var reEnd = regexp.MustCompile(` +}}`)
 
-func writeValues(w io.StringWriter, templates []string, sv *valuesTemplate) []error {
+func writeValues(w BufferedWriter, templates []string, sv *valuesTemplate) []error {
 	var errors []error
 	for _, t := range templates {
 		if atomic.LoadInt32(&running) == 0 {
@@ -371,10 +371,9 @@ func generateRun(cmd *cobra.Command, args []string) {
 	}
 	defer f.Close()
 
-	var w BufferedStringWriter
+	var w BufferedWriter
 	if strings.HasSuffix(metricFile, ".gz") {
-		gzw := gzip.NewWriter(f)
-		w = bufio.NewWriter(gzw)
+		w = gzip.NewWriter(f)
 	} else {
 		w = bufio.NewWriter(f)
 	}
