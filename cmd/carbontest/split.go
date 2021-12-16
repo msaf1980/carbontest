@@ -141,9 +141,9 @@ func splitFile(fileName, suffix string, nodes int, policy SplitPolicy, overwrite
 			err = writers[i].Flush()
 		}
 		if err != nil {
-			return fmt.Errorf("%v for %s", err, fileNames[n])
+			return fmt.Errorf("%v for %s", err, fileNames[i])
 		}
-		log.Printf("%s written", fileNames[n])
+		log.Printf("%s written", fileNames[i])
 	}
 
 	return nil
