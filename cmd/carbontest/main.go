@@ -160,6 +160,10 @@ func standaloneFlags(rootCmd *cobra.Command) {
 
 	cmd.Flags().StringVar(&mainConfig.Shared.T.Compress, "compress", "", "compress [ none | gzip | lz4 ]")
 
+	cmd.Flags().StringVar(&mainConfig.Shared.GraphiteAPI, "graphite-api", "", "graphite API base address (for basic auth set GRAPHITE_USERNAME and GRAPHITE_PASSWORD env vars)")
+	cmd.Flags().VarP(&mainConfig.Shared.AutostopChecks, "autostop", "S", "auto-stop checks (TYPE:EXPRESSION)")
+	cmd.Flags().IntVar(&mainConfig.Shared.AutostopMaxNull, "max-null", 2, "autostop max null (not exist) values (for metrics in autostop rules)")
+
 	rootCmd.AddCommand(cmd)
 }
 

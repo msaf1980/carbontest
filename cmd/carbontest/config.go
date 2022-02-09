@@ -3,13 +3,26 @@ package main
 import (
 	"carbontest/pkg/base"
 	"carbontest/pkg/metriclist"
+	"context"
 	"errors"
 	"fmt"
+	"log"
+	"os"
 	"strings"
 	"time"
 
+	graphiteapi "github.com/msaf1980/graphite-api-client"
+	"github.com/msaf1980/graphite-api-client/types"
 	"go.uber.org/ratelimit"
 )
+
+type Eval interface {
+	Eval(ctx context.Context) ([]types.EvalResult, error)
+	String() string
+	Type() string
+}
+
+var ErrEvalUnknown = errors.New("unknown eval type")
 
 type StringSlice []string
 
@@ -98,6 +111,11 @@ type SharedConfig struct {
 	Min  int32 `json:"min"`
 	Max  int32 `json:"max"`
 	Incr int32 `json:"incr"`
+
+	GraphiteAPI     string      `json:"graphite",omitempty` // graphite API base address
+	AutostopChecks  StringSlice `json:"autostop-checks",omitempty`
+	AutostopMaxNull int         `json:"max-null",omitempty`
+	autostopChecks  []Eval      `json:"-"`
 }
 
 type MainConfig struct {
@@ -171,7 +189,11 @@ func validateSharedConfig(sharedConfig *SharedConfig) error {
 	if sharedConfig.Duration < time.Second {
 		return fmt.Errorf("Invalid test duration: %s", sharedConfig.Duration)
 	}
-	return nil
+	if sharedConfig.AutostopMaxNull < 2 {
+		return fmt.Errorf("autostop-max-absent must be > 1")
+	}
+
+	return buildAutostopRules(sharedConfig)
 }
 
 func validateLocalConfig(localConfig *LocalConfig) error {
@@ -209,4 +231,38 @@ func mergeConfig(sharedСonfig *SharedConfig, workerConfig *WorkerConfig) {
 	if workerConfig.T.SendTimeout == 0 {
 		workerConfig.T.SendTimeout = sharedСonfig.T.SendTimeout
 	}
+}
+
+func buildAutostopRules(sharedСonfig *SharedConfig) error {
+	graphite_username := os.Getenv("GRAPHITE_USERNAME")
+	graphite_password := os.Getenv("GRAPHITE_PASSWORD")
+
+	for _, s := range sharedСonfig.AutostopChecks {
+		if strings.HasPrefix(s, "graphite:") {
+			if len(sharedСonfig.GraphiteAPI) == 0 {
+				return errors.New("Graphite api address not set")
+			}
+			e, err := graphiteapi.NewRenderEval(sharedСonfig.GraphiteAPI, "", "", s[9:], sharedСonfig.AutostopMaxNull)
+			if err != nil {
+				return fmt.Errorf("Unable build rule '%s': %v", s, err)
+			}
+			if graphite_username != "" {
+				e.SetBasicAuth(graphite_username, graphite_password)
+			}
+			if err = evalWithVerify(context.Background(), e); err != nil {
+				return err
+			} else {
+				log.Printf("Add background checker: (%s) %s", e.Type(), e.String())
+				sharedСonfig.autostopChecks = append(sharedСonfig.autostopChecks, e)
+			}
+		} else {
+			return fmt.Errorf("Unknown rule type '%s', valid types: graphite", s)
+		}
+	}
+	if len(sharedСonfig.autostopChecks) > 0 {
+		// run background checker
+		go autostopChecker(sharedСonfig.autostopChecks)
+	}
+
+	return nil
 }
