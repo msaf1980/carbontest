@@ -242,7 +242,7 @@ func buildAutostopRules(sharedСonfig *SharedConfig) error {
 			if len(sharedСonfig.GraphiteAPI) == 0 {
 				return errors.New("Graphite api address not set")
 			}
-			e, err := graphiteapi.NewRenderEval(sharedСonfig.GraphiteAPI, "", "", s[9:], sharedСonfig.AutostopMaxNull)
+			e, err := graphiteapi.NewRenderEval(sharedСonfig.GraphiteAPI, "", "", s[9:], 0, sharedСonfig.AutostopMaxNull)
 			if err != nil {
 				return fmt.Errorf("Unable build rule '%s': %v", s, err)
 			}
