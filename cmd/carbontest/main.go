@@ -53,6 +53,7 @@ func standaloneRun(cmd *cobra.Command, args []string) {
 	var err error
 
 	if len(args) > 0 {
+		fmt.Fprintf(os.Stderr, "\n%v\n%v\n", os.Args, mainConfig.Shared.AutostopChecks)
 		fmt.Fprintf(os.Stderr, "unhandled args: %v\n", args)
 		cmd.Help()
 		os.Exit(1)
@@ -160,7 +161,7 @@ func standaloneFlags(rootCmd *cobra.Command) {
 
 	cmd.Flags().StringVar(&mainConfig.Shared.T.Compress, "compress", "", "compress [ none | gzip | lz4 ]")
 
-	cmd.Flags().StringVar(&mainConfig.Shared.GraphiteAPI, "graphite-api", "", "graphite API base address (for basic auth set GRAPHITE_USERNAME and GRAPHITE_PASSWORD env vars)")
+	cmd.Flags().StringVarP(&mainConfig.Shared.GraphiteAPI, "graphite-api", "T", "", "graphite API base address (for basic auth set GRAPHITE_USERNAME and GRAPHITE_PASSWORD env vars)")
 	cmd.Flags().VarP(&mainConfig.Shared.AutostopChecks, "autostop", "S", "auto-stop checks (TYPE:EXPRESSION)")
 	cmd.Flags().IntVar(&mainConfig.Shared.AutostopMaxNull, "max-null", 2, "autostop max null (not exist) values (for metrics in autostop rules)")
 
@@ -173,6 +174,8 @@ func main() {
 		Use:   os.Args[0],
 		Short: "carbontest is a carbon load test tool",
 	}
+
+	// fmt.Printf("%+v\n", os.Args)
 
 	standaloneFlags(rootCmd)
 	splitFlags(rootCmd)
