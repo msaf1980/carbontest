@@ -112,10 +112,10 @@ type SharedConfig struct {
 	Max  int32 `json:"max"`
 	Incr int32 `json:"incr"`
 
-	GraphiteAPI     string      `json:"graphite",omitempty` // graphite API base address
-	AutostopChecks  StringSlice `json:"autostop-checks",omitempty`
-	AutostopMaxNull int         `json:"max-null",omitempty`
-	autostopChecks  []Eval      `json:"-"`
+	GraphiteAPI       string      `json:"graphite",omitempty` // graphite API base address
+	AutostopChecks    StringSlice `json:"autostop-checks",omitempty`
+	AutostopMaxAbsent int         `json:"max-absent",omitempty`
+	autostopChecks    []Eval      `json:"-"`
 }
 
 type MainConfig struct {
@@ -189,7 +189,7 @@ func validateSharedConfig(sharedConfig *SharedConfig) error {
 	if sharedConfig.Duration < time.Second {
 		return fmt.Errorf("Invalid test duration: %s", sharedConfig.Duration)
 	}
-	if sharedConfig.AutostopMaxNull < 2 {
+	if sharedConfig.AutostopMaxAbsent < 2 {
 		return fmt.Errorf("autostop-max-absent must be > 1")
 	}
 
@@ -242,7 +242,7 @@ func buildAutostopRules(sharedСonfig *SharedConfig) error {
 			if len(sharedСonfig.GraphiteAPI) == 0 {
 				return errors.New("Graphite api address not set")
 			}
-			e, err := graphiteapi.NewRenderEval(sharedСonfig.GraphiteAPI, "", "", s[9:], 0, sharedСonfig.AutostopMaxNull)
+			e, err := graphiteapi.NewRenderEval(sharedСonfig.GraphiteAPI, "", "", s[9:], 0, sharedСonfig.AutostopMaxAbsent)
 			if err != nil {
 				return fmt.Errorf("Unable build rule '%s': %v", s, err)
 			}

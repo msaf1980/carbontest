@@ -163,7 +163,7 @@ func standaloneFlags(rootCmd *cobra.Command) {
 
 	cmd.Flags().StringVarP(&mainConfig.Shared.GraphiteAPI, "graphite-api", "T", "", "graphite API base address (for basic auth set GRAPHITE_USERNAME and GRAPHITE_PASSWORD env vars)")
 	cmd.Flags().VarP(&mainConfig.Shared.AutostopChecks, "autostop", "S", "auto-stop checks (TYPE:EXPRESSION)")
-	cmd.Flags().IntVar(&mainConfig.Shared.AutostopMaxNull, "max-null", 2, "autostop max null (not exist) values (for metrics in autostop rules)")
+	cmd.Flags().IntVar(&mainConfig.Shared.AutostopMaxAbsent, "max-absent", 2, "autostop max absent (not exist) values (for metrics in autostop rules)")
 
 	rootCmd.AddCommand(cmd)
 }
