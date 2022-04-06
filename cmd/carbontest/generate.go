@@ -21,9 +21,9 @@ import (
 )
 
 var (
-	config       string
-	templateFile string
-	metricFile   string
+	config        string
+	templateFiles StringSlice
+	metricFile    string
 )
 
 type Type int
@@ -360,9 +360,13 @@ func generateRun(cmd *cobra.Command, args []string) {
 		log.Fatal(err)
 	}
 
-	templates, err := loadTemplatesFile(templateFile)
-	if err != nil {
-		log.Fatal(err)
+	var templates []string
+	for _, templateFile := range templateFiles {
+		t, err := loadTemplatesFile(templateFile)
+		if err != nil {
+			log.Fatal(err)
+		}
+		templates = append(templates, t...)
 	}
 
 	f, err = os.OpenFile(metricFile, os.O_WRONLY|os.O_CREATE|os.O_TRUNC, 0644)
@@ -409,7 +413,7 @@ func generateFlags(rootCmd *cobra.Command) {
 	cmd.Flags().StringVarP(&config, "config", "c", "", "YAML config")
 	cmd.MarkFlagRequired("config")
 
-	cmd.Flags().StringVarP(&templateFile, "template", "t", "", "template file for metric files, replacement string like {{ STRING }}")
+	cmd.Flags().VarP(&templateFiles, "template", "t", "template files for metric file, replacement string like {{ STRING }}")
 	cmd.MarkFlagRequired("template")
 
 	cmd.Flags().StringVarP(&metricFile, "file", "f", "", "generated metrics file (valid: txt, gz)")
